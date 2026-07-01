@@ -1,0 +1,99 @@
+services:
+  mysql:
+    image: spg-registry.cn-hangzhou.cr.aliyuncs.com/spg/openspg-mysql:latest
+    container_name: ${OPENSPG_CONTAINER_PREFIX:-labkag}-mysql
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      LANG: C.UTF-8
+      MYSQL_ROOT_PASSWORD: ${OPENSPG_MYSQL_ROOT_PASSWORD:-openspg}
+      MYSQL_DATABASE: ${OPENSPG_MYSQL_DATABASE:-openspg}
+    ports:
+      - "${OPENSPG_MYSQL_PORT:-3306}:3306"
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_general_ci"
+    volumes:
+      - openspg_mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${OPENSPG_MYSQL_ROOT_PASSWORD:-openspg}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  neo4j:
+    image: spg-registry.cn-hangzhou.cr.aliyuncs.com/spg/openspg-neo4j:latest
+    container_name: ${OPENSPG_CONTAINER_PREFIX:-labkag}-neo4j
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      NEO4J_AUTH: ${OPENSPG_NEO4J_USER:-neo4j}/${OPENSPG_NEO4J_PASSWORD:-openspgneo4j}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: ${OPENSPG_NEO4J_HEAP_INIT:-1G}
+      NEO4J_server_memory_heap_max__size: ${OPENSPG_NEO4J_HEAP_MAX:-4G}
+      NEO4J_server_memory_pagecache_size: ${OPENSPG_NEO4J_PAGECACHE:-1G}
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+      NEO4J_dbms_security_procedures_unrestricted: "*"
+      NEO4J_dbms_security_procedures_allowlist: "*"
+    ports:
+      - "${OPENSPG_NEO4J_HTTP_PORT:-7474}:7474"
+      - "${OPENSPG_NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - openspg_neo4j_data:/data
+      - openspg_neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  server:
+    image: spg-registry.cn-hangzhou.cr.aliyuncs.com/spg/openspg-server:latest
+    container_name: ${OPENSPG_CONTAINER_PREFIX:-labkag}-server
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      LANG: C.UTF-8
+    ports:
+      - "${OPENSPG_SERVER_PORT:-8887}:8887"
+    command:
+      - "java"
+      - "-Dfile.encoding=UTF-8"
+      - "-Xms${OPENSPG_SERVER_XMS:-2048m}"
+      - "-Xmx${OPENSPG_SERVER_XMX:-8192m}"
+      - "-jar"
+      - "arks-sofaboot-0.0.1-SNAPSHOT-executable.jar"
+      - "--server.repository.impl.jdbc.host=mysql"
+      - "--server.repository.impl.jdbc.password=${OPENSPG_MYSQL_ROOT_PASSWORD:-openspg}"
+      - "--builder.model.execute.num=5"
+      - "--cloudext.graphstore.url=neo4j://neo4j:7687?user=${OPENSPG_NEO4J_USER:-neo4j}&password=${OPENSPG_NEO4J_PASSWORD:-openspgneo4j}&database=neo4j"
+      - "--cloudext.searchengine.url=neo4j://neo4j:7687?user=${OPENSPG_NEO4J_USER:-neo4j}&password=${OPENSPG_NEO4J_PASSWORD:-openspgneo4j}&database=neo4j"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8887"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  openspg_mysql_data:
+  openspg_neo4j_data:
+  openspg_neo4j_logs:

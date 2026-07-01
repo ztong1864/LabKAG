@@ -320,31 +320,26 @@ v0.1 抽取以下对象：
 
 ```text
 Paper
+Method
+Material
+Condition
+Metric
+Result
+Conclusion
+Evidence
+```
+
+暂不作为第一版实体建模：
+
+```text
 Author
 Institution
 ResearchObject
 ResearchProblem
-Method
-Material
-ExperimentCondition
-Metric
-Result
-Conclusion
-Evidence
 ```
 
-最小必做对象：
-
-```text
-Paper
-Method
-Material
-ExperimentCondition
-Metric
-Result
-Conclusion
-Evidence
-```
+说明：作者先保存在 `Paper.authors`；研究对象先由 `Material` 承担；研究问题先保留在
+`Paper.abstract`、`Result` 或 `Conclusion` 的文本描述里。
 
 ### 5.3.3 抽取策略
 
@@ -499,57 +494,6 @@ keywords
 document_id
 ```
 
-#### Author
-
-作者实体。
-
-字段：
-
-```text
-author_id
-name
-email
-orcid
-```
-
-#### Institution
-
-机构实体。
-
-字段：
-
-```text
-institution_id
-name
-country
-department
-```
-
-#### ResearchObject
-
-研究对象。
-
-字段：
-
-```text
-object_id
-name
-type
-description
-```
-
-#### ResearchProblem
-
-研究问题。
-
-字段：
-
-```text
-problem_id
-description
-domain
-```
-
 #### Method
 
 方法实体。
@@ -576,7 +520,7 @@ material_type
 description
 ```
 
-#### ExperimentCondition
+#### Condition
 
 实验条件。
 
@@ -654,24 +598,20 @@ source_text
 v0.1 定义以下关系：
 
 ```text
-Paper authored_by Author
-Author affiliated_with Institution
-
-Paper studies ResearchObject
-Paper addresses ResearchProblem
 Paper proposes Method
 Paper uses Material
-Paper has_condition ExperimentCondition
-Paper evaluates_by Metric
+Paper hasCondition Condition
+Paper measures Metric
 Paper reports Result
-Paper draws_conclusion Conclusion
+Paper drawsConclusion Conclusion
+Paper hasEvidence Evidence
 
-Result measured_by Metric
-Result supported_by Evidence
-Conclusion supported_by Evidence
-Method supported_by Evidence
-Material supported_by Evidence
-ExperimentCondition supported_by Evidence
+Method supportedBy Evidence
+Material supportedBy Evidence
+Condition supportedBy Evidence
+Metric supportedBy Evidence
+Result supportedBy Evidence
+Conclusion supportedBy Evidence
 ```
 
 ### 6.4 v0.1 最小关系
@@ -681,11 +621,17 @@ ExperimentCondition supported_by Evidence
 ```text
 Paper proposes Method
 Paper uses Material
-Paper has_condition ExperimentCondition
+Paper hasCondition Condition
+Paper measures Metric
 Paper reports Result
-Paper draws_conclusion Conclusion
-Result supported_by Evidence
-Conclusion supported_by Evidence
+Paper drawsConclusion Conclusion
+Paper hasEvidence Evidence
+Method supportedBy Evidence
+Material supportedBy Evidence
+Condition supportedBy Evidence
+Metric supportedBy Evidence
+Result supportedBy Evidence
+Conclusion supportedBy Evidence
 ```
 
 ---
@@ -1157,6 +1103,20 @@ Structured JSON Output
 JSON Schema Validation
 Prompt Template
 ```
+
+当前实现约定：
+
+```text
+LLM_API_KEY：启用真实 LLM 抽取
+LLM_BASE_URL：OpenAI-compatible API base URL
+LLM_MODEL：抽取模型
+LLM_TIMEOUT_SECONDS：请求超时
+ALLOW_MOCK_EXTRACTOR：是否允许 mock extractor 作为开发 fallback
+```
+
+未配置 `LLM_API_KEY` 且 `ALLOW_MOCK_EXTRACTOR=true` 时，系统保留 mock extractor
+作为开发 fallback。若 `ALLOW_MOCK_EXTRACTOR=false`，则返回 `extraction_failed`，
+避免生产环境静默写入 mock 数据。
 
 ### 10.4 OpenSPG/KAG 后端
 

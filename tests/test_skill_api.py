@@ -52,7 +52,7 @@ def test_extract_paper_returns_extraction_and_evidence(tmp_path: Path):
         )
     file_id = upload_response.json()["data"]["file_id"]
 
-    response = client.post("/v1/papers/extract", json={"file_id": file_id})
+    response = client.post("/v1/papers/extract", json={"file_id": file_id, "extract_level": "mock"})
 
     assert response.status_code == 200
     body = response.json()
@@ -60,6 +60,67 @@ def test_extract_paper_returns_extraction_and_evidence(tmp_path: Path):
     assert body["data"]["paper_extraction"]["document_id"]
     assert body["evidence"]
     assert body["metadata"]["request_id"]
+    assert body["warnings"] == ["Mock extractor requested; used mock extractor."]
+
+
+def test_extract_paper_fails_when_llm_and_mock_are_unavailable(tmp_path: Path, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "llm_api_key", None)
+    monkeypatch.setattr(settings, "allow_mock_extractor", False)
+
+    client = TestClient(app)
+    pdf_path = tmp_path / "paper.pdf"
+    _make_pdf(pdf_path)
+
+    with pdf_path.open("rb") as file:
+        upload_response = client.post(
+            "/v1/papers/upload",
+            files={"file": ("paper.pdf", file, "application/pdf")},
+        )
+    file_id = upload_response.json()["data"]["file_id"]
+
+    response = client.post("/v1/papers/extract", json={"file_id": file_id})
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["code"] == "extraction_failed"
+    assert "LLM extractor is not configured" in body["errors"][0]["message"]
+
+
+def test_extract_paper_returns_extraction_failed_when_llm_extractor_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from app.config import settings
+    from app.services.paper_extractor import ExtractionError, LLMPaperExtractor
+
+    def raise_extraction_error(*args, **kwargs):
+        raise ExtractionError("LLM response was not valid JSON.")
+
+    monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    monkeypatch.setattr(settings, "allow_mock_extractor", False)
+    monkeypatch.setattr(LLMPaperExtractor, "extract", raise_extraction_error)
+
+    client = TestClient(app)
+    pdf_path = tmp_path / "paper.pdf"
+    _make_pdf(pdf_path)
+
+    with pdf_path.open("rb") as file:
+        upload_response = client.post(
+            "/v1/papers/upload",
+            files={"file": ("paper.pdf", file, "application/pdf")},
+        )
+    file_id = upload_response.json()["data"]["file_id"]
+
+    response = client.post("/v1/papers/extract", json={"file_id": file_id})
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["code"] == "extraction_failed"
+    assert body["errors"][0]["message"] == "LLM response was not valid JSON."
 
 
 def test_mock_ingest_query_search_and_knowledge_routes():
@@ -119,3 +180,28 @@ def test_mock_ingest_query_search_and_knowledge_routes():
     knowledge = client.get("/v1/papers/paper_001/knowledge?project_id=labkag_demo")
     assert knowledge.status_code == 200
     assert "paper" in knowledge.json()["data"]
+
+
+def test_ingest_returns_openspg_write_failed_when_client_fails(monkeypatch):
+    from app.adapters.openspg_client import OpenSPGClientError
+    from app.services import skill_orchestrator
+
+    def fail_write(*args, **kwargs):
+        raise OpenSPGClientError("OpenSPG write failed with HTTP 500: server error")
+
+    monkeypatch.setattr(skill_orchestrator.openspg_client, "write_graph", fail_write)
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/papers/ingest",
+        json={
+            "project_id": "labkag_demo",
+            "paper_extraction": {"document_id": "doc_001"},
+            "confirm": True,
+        },
+    )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["code"] == "openspg_write_failed"

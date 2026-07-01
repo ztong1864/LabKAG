@@ -1,56 +1,153 @@
 # LabKAG Literature Schema v0.1
 
-## Entities
+## Scope
+
+v0.1 only models literature-level knowledge extracted from papers. It does not
+model lab-internal records, author networks, institution networks, research
+problem taxonomies, or domain ontology expansion.
+
+## Entity Types
+
+The first version keeps exactly these entity types:
 
 ```text
 Paper
-Author
-Institution
-ResearchObject
-ResearchProblem
 Method
 Material
-ExperimentCondition
+Condition
 Metric
 Result
 Conclusion
 Evidence
 ```
 
-## Minimum Implemented Entity Types
-
-The first framework pass includes Pydantic support and mock graph mapping for:
+Deferred entity types:
 
 ```text
-Paper
-Method
-Material
-Result
-Conclusion
-Evidence
+Author
+Institution
+ResearchObject
+ResearchProblem
 ```
 
-## Minimum Relations
+For v0.1, authors stay as `Paper.authors`, research objects are represented by
+`Material`, and research problems are left in `Paper.abstract`, `Result`, or
+`Conclusion` text until there is a concrete query need.
+
+## Entity Fields
+
+### Paper
+
+```text
+paperId
+title
+authors
+year
+journal
+doi
+abstract
+keywords
+documentId
+```
+
+### Method
+
+```text
+methodId
+name
+description
+methodType
+```
+
+### Material
+
+```text
+materialId
+name
+type
+description
+```
+
+### Condition
+
+```text
+conditionId
+name
+value
+unit
+normalizedValue
+normalizedUnit
+description
+```
+
+### Metric
+
+```text
+metricId
+name
+value
+unit
+description
+```
+
+### Result
+
+```text
+resultId
+description
+value
+unit
+resultType
+```
+
+### Conclusion
+
+```text
+conclusionId
+description
+scope
+```
+
+### Evidence
+
+```text
+evidenceId
+documentId
+chunkId
+page
+sectionTitle
+sourceText
+offsetStart
+offsetEnd
+paperId
+```
+
+## Relations
 
 ```text
 Paper proposes Method
 Paper uses Material
+Paper hasCondition Condition
+Paper measures Metric
 Paper reports Result
-Paper draws_conclusion Conclusion
-Result supported_by Evidence
-Conclusion supported_by Evidence
+Paper drawsConclusion Conclusion
+Paper hasEvidence Evidence
+
+Method supportedBy Evidence
+Material supportedBy Evidence
+Condition supportedBy Evidence
+Metric supportedBy Evidence
+Result supportedBy Evidence
+Conclusion supportedBy Evidence
 ```
 
-## Evidence Fields
+## Design Notes
 
-```text
-evidence_id
-document_id
-chunk_id
-page
-section_title
-source_text
-offset_start
-offset_end
-paper_id
-```
+The schema is intentionally small. Each extracted fact either belongs directly
+to a paper or is supported by evidence from the source text. More specialized
+entities should be added only after there is a stable query or downstream
+workflow that needs them.
+
+OpenSPG KGDSL requires lowerCamelCase property and relation names. LabKAG's
+internal extraction JSON may still use snake_case Pydantic fields; the adapter
+owns the mapping into KAG-compatible schema names.
