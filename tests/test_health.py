@@ -10,5 +10,4 @@ def test_health_returns_unified_success_response():
     body = response.json()
     assert body["status"] == "success"
     assert body["data"]["service"] == "LabKAG"
-    assert body["data"]["mock_kag"] is True
     assert body["metadata"]["request_id"]

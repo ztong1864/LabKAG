@@ -21,5 +21,15 @@ class MetadataStore:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def load_extraction_by_paper_id(self, paper_id: str) -> dict[str, Any] | None:
+        if not self.extraction_dir.exists():
+            return None
+        for path in self.extraction_dir.glob("*.json"):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            paper = payload.get("paper") or {}
+            if paper.get("paper_id") == paper_id:
+                return payload
+        return None
+
 
 metadata_store = MetadataStore()

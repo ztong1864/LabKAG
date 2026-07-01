@@ -12,6 +12,5 @@ def health():
         data={
             "service": settings.app_name,
             "version": settings.app_version,
-            "mock_kag": settings.mock_kag,
         }
     )

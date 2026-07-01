@@ -9,8 +9,7 @@ class GraphWriteError(RuntimeError):
 
 
 class GraphClient:
-    def __init__(self, mock: bool | None = None, graph_store: Any | None = None) -> None:
-        self.mock = settings.mock_kag if mock is None else mock
+    def __init__(self, graph_store: Any | None = None) -> None:
         self.graph_store = graph_store
 
     def write_graph(
@@ -19,8 +18,8 @@ class GraphClient:
         confirm: bool = False,
         project_id: str | None = None,
     ) -> dict:
-        if self.mock or not confirm:
-            return self._mock_result(graph_payload, confirm=confirm)
+        if not confirm:
+            return self._dry_run_result(graph_payload)
 
         try:
             payload = self._graph_store().write_graph(graph_payload, project_id=project_id)
@@ -42,7 +41,6 @@ class GraphClient:
             "relations_created": payload.get("relations_created", 0),
             "evidence_created": payload.get("evidence_created", 0),
             "dry_run": False,
-            "mock": False,
         }
 
     @staticmethod
@@ -52,22 +50,20 @@ class GraphClient:
                 return entity.get("id", "paper_001")
         return "paper_001"
 
-    def _mock_result(self, graph_payload: dict, confirm: bool = False) -> dict:
+    @staticmethod
+    def _dry_run_result(graph_payload: dict) -> dict:
         return {
-            "paper_id": "paper_001",
-            "entities_created": len(graph_payload.get("entities", [])) if confirm else 0,
-            "relations_created": len(graph_payload.get("relations", [])) if confirm else 0,
+            "paper_id": GraphClient._paper_id_from_payload(graph_payload),
+            "entities_created": len(graph_payload.get("entities", [])),
+            "relations_created": len(graph_payload.get("relations", [])),
             "evidence_created": len(
                 [
                     entity
                     for entity in graph_payload.get("entities", [])
                     if entity.get("type") == "Evidence"
                 ]
-            )
-            if confirm
-            else 0,
-            "dry_run": not confirm,
-            "mock": self.mock,
+            ),
+            "dry_run": True,
         }
 
 

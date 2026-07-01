@@ -90,3 +90,46 @@ def test_neo4j_query_store_filters_by_paper_id():
     assert query.index("WHERE ($project_id") < query.index("OPTIONAL MATCH")
     assert params["paper_id"] == "paper_001"
     assert params["limit"] == 3
+
+
+def test_neo4j_query_store_uses_vector_index_when_query_embedding_is_provided():
+    fake_driver = FakeDriver(
+        [
+            FakeRecord(
+                evidence={
+                    "id": "ev_001",
+                    "evidence_id": "ev_001",
+                    "document_id": "doc_001",
+                    "chunk_id": "chunk_001",
+                    "page": 3,
+                    "source_text": "Catalyst A reached 95% conversion.",
+                    "section_title": "Results",
+                    "paper_id": "paper_001",
+                },
+                paper={"id": "paper_001", "title": "Catalyst paper"},
+                score=0.98,
+            )
+        ]
+    )
+    store = Neo4jQueryStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    results = store.search_evidence(
+        "conversion",
+        project_id="1",
+        paper_id="paper_001",
+        top_k=5,
+        query_embedding=[0.1, 0.2, 0.3],
+    )
+
+    assert results[0].evidence.evidence_id == "ev_001"
+    query, params = fake_driver.fake_session.queries[0]
+    assert "SEARCH e IN (" in query
+    assert "VECTOR INDEX labkag_evidence_embedding_index" in query
+    assert params["query_embedding"] == [0.1, 0.2, 0.3]
+    assert params["limit"] == 5

@@ -110,7 +110,7 @@ def test_graph_client_writes_through_graph_store_with_request_project_id():
             return {"entities_created": 1, "relations_created": 1, "evidence_created": 0}
 
     graph_store = FakeGraphStore()
-    client = GraphClient(mock=False, graph_store=graph_store)
+    client = GraphClient(graph_store=graph_store)
 
     result = client.write_graph(
         {"entities": [{"id": "paper_001", "type": "Paper"}], "relations": []},
@@ -124,7 +124,6 @@ def test_graph_client_writes_through_graph_store_with_request_project_id():
         "relations_created": 1,
         "evidence_created": 0,
         "dry_run": False,
-        "mock": False,
     }
     assert graph_store.calls == [
         {
@@ -141,7 +140,7 @@ def test_graph_client_converts_graph_store_errors(monkeypatch):
         raise GraphStoreFactoryError("NEO4J_PASSWORD is required when GRAPH_BACKEND=neo4j.")
 
     monkeypatch.setattr("app.adapters.graph_client.build_graph_store", fail_build_graph_store)
-    client = GraphClient(mock=False)
+    client = GraphClient()
 
     with pytest.raises(GraphWriteError, match="NEO4J_PASSWORD is required"):
         client.write_graph({"entities": [], "relations": []}, confirm=True)

@@ -5,9 +5,11 @@ from pydantic import BaseModel, Field
 
 class ErrorCode(str, Enum):
     FILE_NOT_FOUND = "file_not_found"
+    PAPER_NOT_FOUND = "paper_not_found"
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
     PARSE_FAILED = "parse_failed"
     EXTRACTION_FAILED = "extraction_failed"
+    EMBEDDING_FAILED = "embedding_failed"
     SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
     EVIDENCE_BINDING_FAILED = "evidence_binding_failed"
     GRAPH_WRITE_FAILED = "graph_write_failed"

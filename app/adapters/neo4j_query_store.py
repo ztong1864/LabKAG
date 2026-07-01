@@ -14,6 +14,8 @@ class EvidenceSearchResult:
 
 
 class Neo4jQueryStore:
+    VECTOR_INDEX_NAME = "labkag_evidence_embedding_index"
+
     def __init__(
         self,
         uri: str,
@@ -35,17 +37,36 @@ class Neo4jQueryStore:
         project_id: str | None = None,
         paper_id: str | None = None,
         top_k: int = 10,
+        query_embedding: list[float] | None = None,
     ) -> list[EvidenceSearchResult]:
         driver = self.driver_factory(self.uri, auth=(self.user, self.password))
         try:
             with driver.session(database=self.database) as session:
-                records = session.run(
-                    self._search_evidence_cypher(paper_id=paper_id),
-                    search_text=query,
-                    project_id=project_id or "",
-                    paper_id=paper_id,
-                    limit=top_k,
+                cypher = (
+                    self._search_evidence_vector_cypher(paper_id=paper_id)
+                    if query_embedding is not None
+                    else self._search_evidence_keyword_cypher(paper_id=paper_id)
                 )
+                params = {
+                    "search_text": query,
+                    "project_id": project_id or "",
+                    "paper_id": paper_id,
+                    "limit": top_k,
+                }
+                if query_embedding is not None:
+                    params["query_embedding"] = query_embedding
+                try:
+                    records = session.run(cypher, **params)
+                except Exception:
+                    if query_embedding is None:
+                        raise
+                    records = session.run(
+                        self._search_evidence_keyword_cypher(paper_id=paper_id),
+                        search_text=query,
+                        project_id=project_id or "",
+                        paper_id=paper_id,
+                        limit=top_k,
+                    )
                 return [self._record_to_result(record) for record in records]
         finally:
             driver.close()
@@ -61,7 +82,7 @@ class Neo4jQueryStore:
         return GraphDatabase.driver(uri, auth=auth)
 
     @staticmethod
-    def _search_evidence_cypher(*, paper_id: str | None = None) -> str:
+    def _search_evidence_keyword_cypher(*, paper_id: str | None = None) -> str:
         paper_filter = "WHERE p.id = $paper_id" if paper_id else ""
         return f"""
         MATCH (e:Evidence)
@@ -72,6 +93,25 @@ class Neo4jQueryStore:
         OPTIONAL MATCH (p:Paper)-[:hasEvidence]->(e)
         {paper_filter}
         RETURN evidence, properties(p) AS paper, 1.0 AS score
+        ORDER BY score DESC, evidence.id
+        LIMIT $limit
+        """
+
+    @staticmethod
+    def _search_evidence_vector_cypher(*, paper_id: str | None = None) -> str:
+        paper_filter = "AND p.id = $paper_id" if paper_id else ""
+        return f"""
+        MATCH (e:Evidence)
+          SEARCH e IN (
+            VECTOR INDEX {Neo4jQueryStore.VECTOR_INDEX_NAME}
+            FOR $query_embedding
+            LIMIT $limit
+          ) SCORE AS score
+        MATCH (p:Paper)-[:hasEvidence]->(e)
+        WITH e, p, score, properties(e) AS evidence
+        WHERE ($project_id = '' OR evidence.project_id = $project_id)
+          {paper_filter}
+        RETURN evidence, properties(p) AS paper, score
         ORDER BY score DESC, evidence.id
         LIMIT $limit
         """

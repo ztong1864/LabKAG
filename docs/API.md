@@ -52,12 +52,8 @@ file=<paper.pdf>
 }
 ```
 
-Extraction normally uses the configured LLM path. In development, the service may
-return a mock extraction and include a warning such as:
-
-```text
-LLM extractor is not configured; used mock extractor.
-```
+Extraction uses the configured LLM path. If the LLM provider is unavailable,
+the endpoint returns `status=failed` with `extraction_failed`.
 
 If extraction cannot run, the endpoint returns `status=failed` with an error code
 such as `extraction_failed`.
@@ -75,8 +71,8 @@ such as `extraction_failed`.
 ```
 
 When `confirm=false`, ingest performs a dry run. When `confirm=true`, the service
-uses the configured graph backend. In development mode it may return local mock
-statistics; in real mode graph write failures return `graph_write_failed`.
+uses the configured graph backend. Graph write failures return
+`graph_write_failed`.
 
 The default v0.1 real backend is Neo4j:
 
@@ -133,8 +129,7 @@ supportedBy
 }
 ```
 
-When `MOCK_KAG=false` and `GRAPH_BACKEND=neo4j`, this endpoint searches matching
-`Evidence` nodes from Neo4j and builds:
+This endpoint searches matching `Evidence` nodes from Neo4j and builds:
 
 ```text
 answer
@@ -158,5 +153,5 @@ evidence
 }
 ```
 
-When real KAG query is enabled, `query` matches against `Evidence.source_text`.
-`paper_id` is optional and narrows the search to one paper.
+`query` matches against `Evidence.source_text`. `paper_id` is optional and
+narrows the search to one paper.

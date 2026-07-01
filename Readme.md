@@ -40,7 +40,6 @@ Implemented in this first framework pass:
 - PDF upload
 - Text PDF parsing through PyMuPDF
 - Evidence-ready chunking
-- Mock paper extraction
 - OpenAI-compatible LLM extraction path for M3
 - Evidence binding validation
 - Configurable graph/KAG adapter for M5
@@ -62,24 +61,20 @@ M3 uses an OpenAI-compatible Chat Completions endpoint. Configure it with:
 $env:LLM_API_KEY="..."
 $env:LLM_BASE_URL="https://api.openai.com/v1"
 $env:LLM_MODEL="gpt-4o-mini"
-$env:ALLOW_MOCK_EXTRACTOR="true"
 ```
 
-`ALLOW_MOCK_EXTRACTOR=true` allows development fallback when `LLM_API_KEY` is
-missing, and also allows `extract_level=mock` for explicit mock extraction.
-Set it to `false` in stricter environments so missing LLM configuration returns
-`extraction_failed` instead of silently using mock data.
+`LLM_API_KEY` is required for `/v1/papers/extract`. Missing LLM configuration
+returns `extraction_failed`.
 
 ## Neo4j Graph Backend
 
 M5 maps `PaperExtractionResult` into graph entities and relations, including
-`supportedBy` evidence relations. By default `MOCK_KAG=true`, so ingest and
-query calls return local mock results without touching Neo4j.
+`supportedBy` evidence relations. Ingest and query use the configured Neo4j
+backend.
 
 For the current local closed loop, use Neo4j directly:
 
 ```powershell
-$env:MOCK_KAG="false"
 $env:GRAPH_BACKEND="neo4j"
 $env:NEO4J_URI="bolt://127.0.0.1:7687"
 $env:NEO4J_USER="neo4j"

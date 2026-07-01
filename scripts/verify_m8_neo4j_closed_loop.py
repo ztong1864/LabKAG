@@ -20,7 +20,6 @@ M8_EVIDENCE_TEXT = "M8 Neo4j-only marker 2026: literature evidence is stored and
 
 def configure_environment() -> None:
     defaults = {
-        "MOCK_KAG": "false",
         "GRAPH_BACKEND": "neo4j",
         "NEO4J_URI": "bolt://127.0.0.1:7687",
         "NEO4J_USER": "neo4j",
@@ -94,7 +93,7 @@ def main() -> int:
             client.post("/v1/papers/ingest", json=build_ingest_payload()),
             "ingest",
         )
-        if ingest["data"].get("mock") is not False:
+        if ingest["data"].get("dry_run") is not False:
             raise RuntimeError(f"ingest did not use real backend: {ingest['data']}")
         if ingest["data"].get("evidence_created", 0) < 1:
             raise RuntimeError(f"ingest created no evidence: {ingest['data']}")

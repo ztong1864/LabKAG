@@ -11,6 +11,7 @@ from app.services.skill_orchestrator import (
     success_response,
 )
 from app.storage.file_store import UnsupportedFileTypeError, file_store
+from app.storage.metadata_store import metadata_store
 
 router = APIRouter(prefix="/v1/papers", tags=["papers"])
 
@@ -41,16 +42,19 @@ def get_paper_knowledge(
     project_id: str | None = None,
     include_evidence: bool = True,
 ):
+    extraction = metadata_store.load_extraction_by_paper_id(paper_id)
+    if extraction is None:
+        raise error_response(404, ErrorCode.PAPER_NOT_FOUND, f"Paper {paper_id} not found.")
+
     data = {
-        "paper": {"paper_id": paper_id},
-        "methods": [],
-        "materials": [],
-        "conditions": [],
-        "metrics": [],
-        "results": [],
-        "conclusions": [],
-        "relations": [],
+        "paper": extraction.get("paper", {}),
+        "methods": extraction.get("methods", []),
+        "materials": extraction.get("materials", []),
+        "conditions": extraction.get("conditions", []),
+        "metrics": extraction.get("metrics", []),
+        "results": extraction.get("results", []),
+        "conclusions": extraction.get("conclusions", []),
     }
     if include_evidence:
-        data["evidence"] = []
-    return success_response(data=data, project_id=project_id)
+        data["evidence"] = extraction.get("evidence", [])
+    return success_response(data=data, project_id=project_id, evidence=data.get("evidence", []))

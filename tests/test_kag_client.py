@@ -31,7 +31,7 @@ class FakeQueryStore:
 
 def test_kag_client_searches_real_evidence_with_query_store():
     query_store = FakeQueryStore()
-    client = KAGClient(mock=False, query_store=query_store)
+    client = KAGClient(query_store=query_store)
 
     evidence = client.search_evidence(
         "conversion",
@@ -48,7 +48,7 @@ def test_kag_client_searches_real_evidence_with_query_store():
 
 def test_kag_client_builds_answer_from_real_evidence():
     query_store = FakeQueryStore()
-    client = KAGClient(mock=False, query_store=query_store)
+    client = KAGClient(query_store=query_store)
 
     result = client.query(
         "What conversion was reported?",
@@ -71,7 +71,7 @@ def test_kag_client_returns_empty_answer_when_no_real_evidence_matches():
         def search_evidence(self, query, *, project_id=None, paper_id=None, top_k=10):
             return []
 
-    client = KAGClient(mock=False, query_store=EmptyQueryStore())
+    client = KAGClient(query_store=EmptyQueryStore())
 
     result = client.query("missing", project_id="1")
 
@@ -101,7 +101,7 @@ def test_kag_client_builds_query_store_from_primary_neo4j_settings(monkeypatch):
     monkeypatch.setattr(settings, "neo4j_database", "new-db")
     monkeypatch.setattr("app.adapters.kag_client.Neo4jQueryStore", FakeNeo4jQueryStore)
 
-    client = KAGClient(mock=False)
+    client = KAGClient()
     client.search_evidence("conversion")
 
     assert created == {
@@ -110,6 +110,59 @@ def test_kag_client_builds_query_store_from_primary_neo4j_settings(monkeypatch):
         "password": "new-password",
         "database": "new-db",
     }
+
+
+def test_kag_client_passes_query_embedding_when_embedding_is_enabled(monkeypatch):
+    from app.config import settings
+
+    calls = {}
+
+    class FakeEmbeddingClient:
+        def embed_texts(self, texts):
+            calls["texts"] = list(texts)
+            return [[0.1, 0.2, 0.3]]
+
+    class FakeNeo4jQueryStore:
+        def __init__(self, *, uri, user, password, database):
+            self.uri = uri
+            self.user = user
+            self.password = password
+            self.database = database
+
+        def search_evidence(
+            self,
+            query,
+            *,
+            project_id=None,
+            paper_id=None,
+            top_k=10,
+            query_embedding=None,
+        ):
+            calls["query"] = query
+            calls["project_id"] = project_id
+            calls["paper_id"] = paper_id
+            calls["top_k"] = top_k
+            calls["query_embedding"] = query_embedding
+            return []
+
+    monkeypatch.setattr(settings, "graph_backend", "neo4j")
+    monkeypatch.setattr(settings, "neo4j_uri", "bolt://new-host:7687")
+    monkeypatch.setattr(settings, "neo4j_user", "new-user")
+    monkeypatch.setattr(settings, "neo4j_password", "new-password")
+    monkeypatch.setattr(settings, "neo4j_database", "new-db")
+    monkeypatch.setattr(settings, "enable_embedding", True)
+    monkeypatch.setattr(settings, "embedding_model", "text-embedding-3-small")
+    monkeypatch.setattr("app.adapters.kag_client.Neo4jQueryStore", FakeNeo4jQueryStore)
+
+    client = KAGClient(query_store=None)
+    client.embedding_client = FakeEmbeddingClient()
+    client.search_evidence("conversion", project_id="1", paper_id="paper_001", top_k=4)
+
+    assert calls["texts"] == ["conversion"]
+    assert calls["query_embedding"] == [0.1, 0.2, 0.3]
+    assert calls["project_id"] == "1"
+    assert calls["paper_id"] == "paper_001"
+    assert calls["top_k"] == 4
 
 
 def test_query_adapter_passes_request_scope_to_kag_client(monkeypatch):

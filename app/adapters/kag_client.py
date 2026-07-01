@@ -1,14 +1,20 @@
+import inspect
 from typing import Any
 
+from app.adapters.embedding_client import configured_embedding_client
 from app.adapters.neo4j_query_store import Neo4jQueryStore
 from app.config import settings
 from app.schemas.evidence import Evidence
 
 
 class KAGClient:
-    def __init__(self, mock: bool | None = None, query_store: Any | None = None) -> None:
-        self.mock = settings.mock_kag if mock is None else mock
+    def __init__(
+        self,
+        query_store: Any | None = None,
+        embedding_client: Any | None = None,
+    ) -> None:
         self.query_store = query_store
+        self.embedding_client = embedding_client
 
     def query(
         self,
@@ -17,31 +23,16 @@ class KAGClient:
         paper_id: str | None = None,
         top_k: int = 5,
     ) -> dict:
-        if not self.mock:
-            results = self._query_store().search_evidence(
-                question,
-                project_id=project_id,
-                paper_id=paper_id,
-                top_k=top_k,
-            )
-            return self._answer_from_evidence(results)
-
-        evidence = Evidence(
-            evidence_id="ev_mock_001",
-            document_id="doc_mock",
-            paper_id="paper_001",
-            chunk_id="chunk_mock_001",
-            page=1,
-            section_title="Mock Evidence",
-            source_text="Mock KAG evidence for the requested literature question.",
-        )
-        return {
-            "answer": f"Mock answer for: {question}",
-            "related_entities": [],
-            "reasoning_path": [],
-            "confidence": "medium",
-            "evidence": [evidence],
+        query_embedding = self._query_embedding(question)
+        search_kwargs = {
+            "project_id": project_id,
+            "paper_id": paper_id,
+            "top_k": top_k,
         }
+        if query_embedding is not None:
+            search_kwargs["query_embedding"] = query_embedding
+        results = self._search_evidence(question, **search_kwargs)
+        return self._answer_from_evidence(results)
 
     def search_evidence(
         self,
@@ -50,28 +41,18 @@ class KAGClient:
         paper_id: str | None = None,
         top_k: int = 10,
     ) -> list[Evidence]:
-        if not self.mock:
-            return [
-                result.evidence
-                for result in self._query_store().search_evidence(
-                    query,
-                    project_id=project_id,
-                    paper_id=paper_id,
-                    top_k=top_k,
-                )
-            ]
-
+        query_embedding = self._query_embedding(query)
+        search_kwargs = {
+            "project_id": project_id,
+            "paper_id": paper_id,
+            "top_k": top_k,
+        }
+        if query_embedding is not None:
+            search_kwargs["query_embedding"] = query_embedding
         return [
-            Evidence(
-                evidence_id="ev_mock_001",
-                document_id="doc_mock",
-                paper_id="paper_001",
-                chunk_id="chunk_mock_001",
-                page=1,
-                section_title="Mock Evidence",
-                source_text=f"Mock evidence matched query: {query}",
-            )
-        ][:top_k]
+            result.evidence
+            for result in self._search_evidence(query, **search_kwargs)
+        ]
 
     def _query_store(self) -> Any:
         if self.query_store is not None:
@@ -87,6 +68,21 @@ class KAGClient:
             database=settings.neo4j_database,
         )
         return self.query_store
+
+    def _query_embedding(self, text: str) -> list[float] | None:
+        if not settings.enable_embedding:
+            return None
+        client = self.embedding_client or configured_embedding_client()
+        if client is None:
+            return None
+        return client.embed_texts([text])[0]
+
+    def _search_evidence(self, query: str, **search_kwargs: Any):
+        query_store = self._query_store()
+        if "query_embedding" in inspect.signature(query_store.search_evidence).parameters:
+            return query_store.search_evidence(query, **search_kwargs)
+        search_kwargs.pop("query_embedding", None)
+        return query_store.search_evidence(query, **search_kwargs)
 
     @staticmethod
     def _answer_from_evidence(results: list[Any]) -> dict:

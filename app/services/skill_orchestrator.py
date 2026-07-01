@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 
+from app.adapters.embedding_client import configured_embedding_client
 from app.adapters.graph_client import GraphWriteError, graph_client
 from app.adapters.graph_mapper import map_extraction_to_graph
 from app.config import settings
@@ -8,12 +9,12 @@ from app.schemas.errors import ErrorCode, SkillError
 from app.schemas.paper import ExtractPaperRequest, IngestPaperRequest
 from app.schemas.response import SkillResponse
 from app.services.chunker import chunk_pages
+from app.services.embedding_service import attach_evidence_embeddings
 from app.services.evidence_binder import bind_required_evidence
 from app.services.paper_extractor import (
     ExtractionError,
     LLMPaperExtractor,
     configured_chat_client,
-    extract_paper_mock,
 )
 from app.services.pdf_parser import parse_pdf
 from app.storage.file_store import file_store
@@ -67,31 +68,23 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
     document_id = new_id("doc")
     document = parse_pdf(pdf_path, document_id=document_id)
     document.chunks = chunk_pages(document.document_id, document.pages)
-    warnings: list[str] = []
     chat_client = configured_chat_client()
-    use_mock = chat_client is None or request.extract_level == "mock"
-    if use_mock and not settings.allow_mock_extractor:
+    if chat_client is None:
         raise error_response(
             503,
             ErrorCode.EXTRACTION_FAILED,
-            "LLM extractor is not configured and mock extractor is disabled.",
+            "LLM extractor is not configured.",
         )
 
-    if use_mock:
-        extraction = extract_paper_mock(document)
-        if request.extract_level == "mock":
-            warnings.append("Mock extractor requested; used mock extractor.")
-        else:
-            warnings.append("LLM extractor is not configured; used mock extractor.")
-    else:
-        try:
-            extraction = LLMPaperExtractor(chat_client).extract(
-                document,
-                extract_level=request.extract_level,
-            )
-        except ExtractionError as exc:
-            raise error_response(502, ErrorCode.EXTRACTION_FAILED, str(exc)) from exc
-    warnings.extend(bind_required_evidence(extraction))
+    try:
+        extraction = LLMPaperExtractor(chat_client).extract(
+            document,
+            extract_level=request.extract_level,
+        )
+    except ExtractionError as exc:
+        raise error_response(502, ErrorCode.EXTRACTION_FAILED, str(exc)) from exc
+
+    warnings = bind_required_evidence(extraction)
     metadata_store.save_extraction(document_id, extraction.model_dump(mode="json"))
 
     data = {"paper_extraction": extraction.model_dump(mode="json")}
@@ -106,6 +99,19 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
 
 
 def ingest_paper(request: IngestPaperRequest) -> SkillResponse:
+    if settings.enable_embedding:
+        embedding_client = configured_embedding_client()
+        if embedding_client is None:
+            raise error_response(
+                503,
+                ErrorCode.EMBEDDING_FAILED,
+                "Embedding provider is not configured.",
+            )
+        attach_evidence_embeddings(
+            request.paper_extraction,
+            embedding_client,
+            model=settings.embedding_model,
+        )
     graph_payload = map_extraction_to_graph(request.paper_extraction)
     try:
         result = graph_client.write_graph(

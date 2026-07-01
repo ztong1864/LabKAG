@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.schemas.extraction import PaperExtractionResult
@@ -6,7 +8,7 @@ from app.schemas.extraction import PaperExtractionResult
 class ExtractPaperRequest(BaseModel):
     file_id: str
     project_id: str | None = None
-    extract_level: str = "basic"
+    extract_level: Literal["basic", "detailed"] = "basic"
     return_chunks: bool = False
 
 

@@ -20,14 +20,13 @@ PDF 上传
 ```text
 FastAPI
 Python 3.10
-LLM API，可选；mock fallback 可控
+LLM API，必需；抽取失败直接返回 `extraction_failed`
 Neo4j
 ```
 
 当前图后端配置：
 
 ```env
-MOCK_KAG=false
 GRAPH_BACKEND=neo4j
 NEO4J_URI=bolt://127.0.0.1:7687
 NEO4J_USER=neo4j
@@ -89,8 +88,7 @@ page / chunk_id 保留
 
 ```text
 OpenAI-compatible Chat Completions 抽取
-ALLOW_MOCK_EXTRACTOR 控制 mock fallback
-extract_level=mock 显式 mock 抽取
+`extract_level` 仅支持 `basic` / `detailed`
 LLM 抽取异常统一转换为 extraction_failed
 ```
 
