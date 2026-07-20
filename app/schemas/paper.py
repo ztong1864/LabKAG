@@ -10,6 +10,7 @@ class ExtractPaperRequest(BaseModel):
     project_id: str | None = None
     extract_level: Literal["basic", "detailed"] = "basic"
     return_chunks: bool = False
+    use_backup: bool = False
 
 
 class IngestPaperRequest(BaseModel):

@@ -40,6 +40,7 @@ logs/
 data/ata_paper/
 data/uploads/
 data/parsed/
+data/parsed_backup/
 data/extractions/
 
 # Local databases
