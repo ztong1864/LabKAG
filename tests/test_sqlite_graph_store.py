@@ -75,6 +75,38 @@ def test_write_graph_excludes_id_from_stored_properties(tmp_path: Path):
         conn.close()
 
 
+def test_write_graph_flattens_tags_into_scalar_properties(tmp_path: Path):
+    store = SQLiteGraphStore(db_path=tmp_path / "graph.db")
+    payload = {
+        "entities": [
+            {
+                "id": "res_001",
+                "type": "Result",
+                "properties": {
+                    "description": "Iron catalyzed the reaction.",
+                    "tags": {"catalyst_type": "iron", "reaction_type": "oxidation"},
+                },
+            }
+        ],
+        "relations": [],
+    }
+
+    store.write_graph(payload, project_id="labkag_demo")
+
+    conn = connect(tmp_path / "graph.db")
+    try:
+        properties = json.loads(
+            conn.execute(
+                "SELECT properties FROM nodes WHERE id = ?", ("res_001",)
+            ).fetchone()[0]
+        )
+        assert properties["tag_catalyst_type"] == "iron"
+        assert properties["tag_reaction_type"] == "oxidation"
+        assert "tags" not in properties
+    finally:
+        conn.close()
+
+
 def test_write_graph_upserts_on_conflict(tmp_path: Path):
     store = SQLiteGraphStore(db_path=tmp_path / "graph.db")
     payload = {

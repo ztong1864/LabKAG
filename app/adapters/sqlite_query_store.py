@@ -2,9 +2,19 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.adapters.neo4j_query_store import EvidenceSearchResult
+from app.adapters.neo4j_query_store import EvidenceSearchResult, PaperEntityRow
 from app.adapters.sqlite_connection import connect, vec_available
 from app.schemas.evidence import Evidence
+
+_ENTITY_RELATION_TYPES = (
+    "proposes",
+    "uses",
+    "hasCondition",
+    "measures",
+    "reports",
+    "drawsConclusion",
+)
+_ENTITY_RELATION_PLACEHOLDERS = ",".join("?" for _ in _ENTITY_RELATION_TYPES)
 
 
 class SQLiteQueryStore:
@@ -111,6 +121,128 @@ class SQLiteQueryStore:
             if len(results) >= top_k:
                 break
         return results
+
+    def list_papers(
+        self, project_id: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        conn = connect(self.db_path, embedding_dim=self.embedding_dim)
+        try:
+            sql = (
+                "SELECT id, properties FROM nodes "
+                "WHERE type = 'Paper' AND project_id = ? ORDER BY id"
+            )
+            params: list[Any] = [project_id]
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                params += [limit, offset]
+            elif offset:
+                sql += " LIMIT -1 OFFSET ?"
+                params += [offset]
+            rows = conn.execute(sql, params).fetchall()
+            return [self._paper_dict(node_id, properties_json) for node_id, properties_json in rows]
+        finally:
+            conn.close()
+
+    def count_papers_with_tag_values(
+        self, project_id: str, removals: list[dict[str, str]]
+    ) -> int:
+        """Count distinct papers that have an entity tagged with any of the
+        given removed/renamed values, for taxonomy-edit breaking-change
+        detection. `removals` is a list of {"property": "tag_<category>",
+        "value": <value>} dicts -- same shape Neo4jQueryStore expects."""
+        if not removals:
+            return 0
+        conn = connect(self.db_path, embedding_dim=self.embedding_dim)
+        try:
+            paper_ids: set[str] = set()
+            for removal in removals:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT p.id
+                    FROM edges he
+                    JOIN nodes e ON e.id = he.target_id
+                    JOIN nodes p ON p.id = he.source_id AND p.type = 'Paper'
+                    WHERE he.relation_type IN ({_ENTITY_RELATION_PLACEHOLDERS})
+                      AND p.project_id = ? AND e.project_id = ?
+                      AND json_extract(e.properties, '$.' || ?) = ?
+                    """,
+                    (
+                        *_ENTITY_RELATION_TYPES,
+                        project_id,
+                        project_id,
+                        removal["property"],
+                        removal["value"],
+                    ),
+                ).fetchall()
+                paper_ids.update(row[0] for row in rows)
+            return len(paper_ids)
+        finally:
+            conn.close()
+
+    def fetch_entities_for_topic_matching(
+        self, project_id: str, limit: int = 5000, offset: int = 0
+    ) -> list[PaperEntityRow]:
+        """One row per (paper, entity) pair, aggregated in Python into one
+        PaperEntityRow per paper -- same shape Neo4jQueryStore returns, so
+        topic_matcher.py works identically against either backend. limit/
+        offset apply to the paper list itself, not the underlying SQL rows,
+        since a single paper's entities all need to be grouped together
+        first; fine at this corpus scale (a safety cap, same caveat noted
+        on the Neo4j version)."""
+        conn = connect(self.db_path, embedding_dim=self.embedding_dim)
+        try:
+            sql = f"""
+            SELECT p.id, p.properties, e.id, e.type, he.relation_type, e.properties,
+                   GROUP_CONCAT(DISTINCT ev.id)
+            FROM nodes p
+            LEFT JOIN edges he ON he.source_id = p.id
+                AND he.relation_type IN ({_ENTITY_RELATION_PLACEHOLDERS})
+            LEFT JOIN nodes e ON e.id = he.target_id
+            LEFT JOIN edges se ON se.source_id = e.id AND se.relation_type = 'supportedBy'
+            LEFT JOIN nodes ev ON ev.id = se.target_id AND ev.type = 'Evidence'
+            WHERE p.type = 'Paper' AND p.project_id = ?
+            GROUP BY p.id, e.id
+            ORDER BY p.id
+            """
+            rows = conn.execute(sql, (*_ENTITY_RELATION_TYPES, project_id)).fetchall()
+
+            papers: dict[str, PaperEntityRow] = {}
+            order: list[str] = []
+            for (
+                paper_id,
+                paper_props_json,
+                entity_id,
+                entity_type,
+                relation,
+                entity_props_json,
+                evidence_csv,
+            ) in rows:
+                if paper_id not in papers:
+                    papers[paper_id] = PaperEntityRow(
+                        paper_id=paper_id,
+                        paper_properties=json.loads(paper_props_json) if paper_props_json else {},
+                        entities=[],
+                    )
+                    order.append(paper_id)
+                if entity_id is not None:
+                    papers[paper_id].entities.append(
+                        {
+                            "entity_id": entity_id,
+                            "entity_type": entity_type,
+                            "relation": relation,
+                            "properties": (
+                                json.loads(entity_props_json) if entity_props_json else {}
+                            ),
+                            "evidence_ids": evidence_csv.split(",") if evidence_csv else [],
+                        }
+                    )
+
+            result = [papers[pid] for pid in order]
+            if offset:
+                result = result[offset:]
+            return result[:limit]
+        finally:
+            conn.close()
 
     @staticmethod
     def _paper_dict(paper_id: str | None, paper_properties_json: str | None) -> dict[str, Any]:

@@ -19,11 +19,17 @@ class SQLiteGraphStore:
         try:
             with conn:
                 for entity in graph_payload.get("entities", []):
+                    raw_properties = dict(entity.get("properties", {}))
+                    tags = raw_properties.pop("tags", None)
                     properties = {
                         key: value
-                        for key, value in entity.get("properties", {}).items()
+                        for key, value in raw_properties.items()
                         if value is not None and key != "id"
                     }
+                    if isinstance(tags, dict):
+                        for category, value in tags.items():
+                            if value is not None:
+                                properties[f"tag_{category}"] = value
                     conn.execute(
                         "INSERT INTO nodes (id, type, project_id, properties) "
                         "VALUES (?, ?, ?, ?) "
