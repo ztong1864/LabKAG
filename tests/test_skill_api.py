@@ -6,8 +6,15 @@ from fastapi.testclient import TestClient
 from app.adapters import kag_query_adapter
 from app.main import app
 from app.schemas.evidence import Evidence
-from app.schemas.extraction import ExtractedResult, PaperExtractionResult, PaperMetadata
+from app.schemas.extraction import (
+    ExtractedMaterial,
+    ExtractedResult,
+    PaperExtractionResult,
+    PaperMetadata,
+)
+from app.schemas.taxonomy import ProjectTaxonomy, TaxonomyCategory
 from app.services import skill_orchestrator
+from app.storage.taxonomy_store import taxonomy_store
 
 
 class FakeChatClient:
@@ -133,6 +140,93 @@ def test_extract_paper_returns_extraction_and_evidence(tmp_path: Path, monkeypat
     assert body["evidence"]
     assert body["metadata"]["request_id"]
     assert body["warnings"] == []
+
+
+def _fake_extract_with_material(self, document, extract_level="basic"):
+    return PaperExtractionResult(
+        document_id=document.document_id,
+        paper=PaperMetadata(title="Catalyst Study", paper_id="paper_001"),
+        materials=[ExtractedMaterial(material_id="material_001", name="Fe(NO3)3")],
+    )
+
+
+def test_extract_paper_tags_entities_when_project_has_taxonomy(tmp_path: Path, monkeypatch):
+    client = TestClient(app)
+    pdf_path = tmp_path / "paper.pdf"
+    _make_pdf(pdf_path)
+
+    taxonomy_store.save_taxonomy(
+        "proj_tagged",
+        ProjectTaxonomy(
+            project_id="proj_tagged",
+            version=1,
+            categories=[
+                TaxonomyCategory(
+                    key="catalyst_type",
+                    allowed_values=["iron", "copper"],
+                    aliases={"iron": ["Fe(NO3)3"]},
+                )
+            ],
+        ).model_dump(mode="json"),
+    )
+
+    fake_tag_payload = {"tags": {"material_001": {"catalyst_type": "Fe(NO3)3"}}}
+    monkeypatch.setattr(
+        skill_orchestrator, "configured_chat_client", lambda: FakeChatClient(fake_tag_payload)
+    )
+    monkeypatch.setattr(
+        skill_orchestrator.LLMPaperExtractor, "extract", _fake_extract_with_material
+    )
+
+    with pdf_path.open("rb") as file:
+        upload_response = client.post(
+            "/v1/papers/upload",
+            files={"file": ("paper.pdf", file, "application/pdf")},
+        )
+    file_id = upload_response.json()["data"]["file_id"]
+
+    response = client.post(
+        "/v1/papers/extract",
+        json={"file_id": file_id, "project_id": "proj_tagged", "extract_level": "basic"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    material = body["data"]["paper_extraction"]["materials"][0]
+    assert material["tags"] == {"catalyst_type": "iron"}
+    assert body["data"]["paper_extraction"]["taxonomy_version"] == 1
+
+
+def test_extract_paper_untagged_when_project_has_no_taxonomy(tmp_path: Path, monkeypatch):
+    client = TestClient(app)
+    pdf_path = tmp_path / "paper.pdf"
+    _make_pdf(pdf_path)
+
+    monkeypatch.setattr(skill_orchestrator, "configured_chat_client", lambda: FakeChatClient({}))
+    monkeypatch.setattr(
+        skill_orchestrator.LLMPaperExtractor, "extract", _fake_extract_with_material
+    )
+
+    with pdf_path.open("rb") as file:
+        upload_response = client.post(
+            "/v1/papers/upload",
+            files={"file": ("paper.pdf", file, "application/pdf")},
+        )
+    file_id = upload_response.json()["data"]["file_id"]
+
+    response = client.post(
+        "/v1/papers/extract",
+        json={"file_id": file_id, "project_id": "proj_no_taxonomy", "extract_level": "basic"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["warnings"] == []
+    material = body["data"]["paper_extraction"]["materials"][0]
+    assert material["tags"] == {}
+    assert body["data"]["paper_extraction"]["taxonomy_version"] is None
 
 
 def test_extract_paper_fails_when_llm_is_unavailable(tmp_path: Path, monkeypatch):

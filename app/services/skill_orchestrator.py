@@ -8,6 +8,7 @@ from app.schemas.common import SkillMetadata
 from app.schemas.errors import ErrorCode, SkillError
 from app.schemas.paper import ExtractPaperRequest, IngestPaperRequest
 from app.schemas.response import SkillResponse, SkillStatus
+from app.schemas.taxonomy import ProjectTaxonomy
 from app.services.chunker import chunk_pages
 from app.services.embedding_service import attach_evidence_embeddings
 from app.services.evidence_binder import bind_required_evidence
@@ -17,8 +18,10 @@ from app.services.paper_extractor import (
     configured_chat_client,
 )
 from app.services.pdf_parser import parse_pdf
+from app.services.taxonomy_tagger import tag_extraction
 from app.storage.file_store import file_store
 from app.storage.metadata_store import metadata_store
+from app.storage.taxonomy_store import taxonomy_store
 from app.utils.ids import new_id
 from app.utils.time import utc_now_iso
 
@@ -86,6 +89,16 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
         raise error_response(502, ErrorCode.EXTRACTION_FAILED, str(exc)) from exc
 
     warnings = bind_required_evidence(extraction)
+
+    if request.project_id:
+        taxonomy_payload = taxonomy_store.load_taxonomy(request.project_id)
+        if taxonomy_payload is not None:
+            taxonomy = ProjectTaxonomy.model_validate(taxonomy_payload)
+            try:
+                warnings.extend(tag_extraction(extraction, taxonomy, chat_client))
+            except ExtractionError as exc:
+                warnings.append(f"Tagging failed; extraction saved untagged: {exc}")
+
     metadata_store.save_extraction(document_id, extraction.model_dump(mode="json"))
 
     data = {"paper_extraction": extraction.model_dump(mode="json")}
