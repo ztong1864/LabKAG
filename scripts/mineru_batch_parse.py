@@ -22,12 +22,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# PDF filenames routinely contain non-ASCII characters (accents, unicode
+# dashes). The default console encoding on some Windows locales (e.g. GBK)
+# can't represent them, which crashes plain print() mid-batch. Force UTF-8
+# with a safe fallback so a stray filename never kills a long-running batch.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from app.adapters.mineru_client import (  # noqa: E402
     DEFAULT_BATCH_SIZE,
     MinerUClient,
-    MinerUError,
     _now_utc,
-    _slugify,
 )
 
 DEFAULT_OUTPUT_DIR = Path("data/parsed")
@@ -172,7 +179,10 @@ def main() -> int:
                 "markdown_chars": len(a.markdown),
             }
             manifest["completed"].append(record)
-            print(f"[done] {result.pdf_path.name} -> {a.markdown_copy.name} ({len(a.markdown):,} chars)")
+            print(
+                f"[done] {result.pdf_path.name} -> {a.markdown_copy.name} "
+                f"({len(a.markdown):,} chars)"
+            )
         else:
             manifest["failed"].append({
                 "pdf_name": result.pdf_path.name,
