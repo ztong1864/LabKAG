@@ -75,6 +75,7 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
         document_id=document_id,
         use_backup=request.use_backup,
         mineru_output_dir=request.mineru_output_dir,
+        original_file_name=file_store.original_name(request.file_id),
     )
     document.chunks = chunk_pages(document.document_id, document.pages)
     chat_client = configured_chat_client()

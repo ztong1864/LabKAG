@@ -153,9 +153,20 @@ class MinerUClient:
         finally:
             session.close()
 
-    def materialize(self, pdf_path: Path, output_dir: Path, force: bool = False) -> MinerUArtifacts:
-        """Full materialize: save zip, extract all sidecars, images, and rewritten markdown."""
-        slug = _slugify(pdf_path.stem)
+    def materialize(
+        self,
+        pdf_path: Path,
+        output_dir: Path,
+        force: bool = False,
+        slug_source: str | None = None,
+    ) -> MinerUArtifacts:
+        """Full materialize: save zip, extract all sidecars, images, and rewritten markdown.
+
+        slug_source, if given, is used to compute the cache/output slug instead
+        of pdf_path.stem -- lets a caller whose local file is stored under an
+        internal id (e.g. a file_id, not the paper's real filename) still hit
+        a cache keyed on the paper's original name."""
+        slug = _slugify(Path(slug_source).stem if slug_source else pdf_path.stem)
         cached = None if force else self._read_cache(output_dir, slug)
         if cached is not None:
             return cached

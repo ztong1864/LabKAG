@@ -63,6 +63,48 @@ def test_materialize_retries_mineru_when_cached_markdown_is_too_short(tmp_path: 
     assert markdown_path.read_text(encoding="utf-8") == fresh_markdown
 
 
+def test_materialize_uses_slug_source_for_cache_lookup_instead_of_local_path(tmp_path: Path):
+    output_dir = tmp_path / "mineru"
+    # Cache written under the paper's real name, as mineru_batch_parse.py would.
+    cached_markdown = "x" * MIN_MARKDOWN_CHARS
+    markdown_path = output_dir / "markdown" / "1-s2.0-s0040402013011022-main.md"
+    markdown_path.parent.mkdir(parents=True)
+    markdown_path.write_text(cached_markdown, encoding="utf-8")
+
+    client = FakeMinerUClient()
+    # Local file lives under an internal id-based name that would slugify
+    # completely differently -- without slug_source this must miss the cache.
+    local_path = tmp_path / "file_abc123.pdf"
+
+    artifacts = client.materialize(
+        local_path,
+        output_dir,
+        slug_source="1-s2.0-S0040402013011022-main.pdf",
+    )
+
+    assert artifacts.markdown == cached_markdown
+    assert client.upload_calls == []
+
+
+def test_materialize_without_slug_source_misses_cache_keyed_on_original_name(tmp_path: Path):
+    output_dir = tmp_path / "mineru"
+    cached_markdown = "x" * MIN_MARKDOWN_CHARS
+    markdown_path = output_dir / "markdown" / "1-s2.0-s0040402013011022-main.md"
+    markdown_path.parent.mkdir(parents=True)
+    markdown_path.write_text(cached_markdown, encoding="utf-8")
+
+    fresh_markdown = "fresh MinerU markdown " + ("x" * MIN_MARKDOWN_CHARS)
+    zip_path = tmp_path / "result.zip"
+    _write_result_zip(zip_path, fresh_markdown)
+    client = FakeMinerUClient(zip_source=zip_path)
+    local_path = tmp_path / "file_abc123.pdf"
+
+    artifacts = client.materialize(local_path, output_dir)
+
+    assert artifacts.markdown == fresh_markdown
+    assert len(client.upload_calls) == 1
+
+
 def test_with_retries_returns_immediately_on_success():
     calls = []
 
