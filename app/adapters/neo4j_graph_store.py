@@ -84,11 +84,18 @@ class Neo4jGraphStore:
 
     @classmethod
     def _properties(cls, values: dict[str, Any]) -> dict[str, Any]:
-        return {
+        values = dict(values)
+        tags = values.pop("tags", None)
+        properties = {
             key: cls._property_value(value)
             for key, value in values.items()
             if value is not None and key != "id"
         }
+        if isinstance(tags, dict):
+            for category, value in tags.items():
+                if value is not None:
+                    properties[f"tag_{cls._safe_token(category)}"] = cls._property_value(value)
+        return properties
 
     @staticmethod
     def _property_value(value: Any) -> Any:

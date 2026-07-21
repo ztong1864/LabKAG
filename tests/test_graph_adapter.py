@@ -63,6 +63,26 @@ def test_map_extraction_to_graph_links_paper_to_evidence():
     assert ("paper_doc_001", "hasEvidence", "ev_001") in relation_keys
 
 
+def test_map_extraction_to_graph_includes_paper_embedding_and_taxonomy_version():
+    extraction = _extraction()
+    extraction.paper_embedding = [0.1, 0.2, 0.3]
+    extraction.taxonomy_version = 2
+
+    graph = map_extraction_to_graph(extraction)
+
+    paper_entity = next(entity for entity in graph["entities"] if entity["type"] == "Paper")
+    assert paper_entity["properties"]["paper_embedding"] == [0.1, 0.2, 0.3]
+    assert paper_entity["properties"]["taxonomy_version"] == 2
+
+
+def test_map_extraction_to_graph_omits_paper_embedding_and_taxonomy_version_when_unset():
+    graph = map_extraction_to_graph(_extraction())
+
+    paper_entity = next(entity for entity in graph["entities"] if entity["type"] == "Paper")
+    assert paper_entity["properties"]["paper_embedding"] is None
+    assert paper_entity["properties"]["taxonomy_version"] is None
+
+
 def test_map_extraction_to_graph_includes_conditions_and_metrics():
     extraction = _extraction()
     evidence = extraction.evidence[0]

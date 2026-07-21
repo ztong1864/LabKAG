@@ -6,11 +6,16 @@ def map_extraction_to_graph(extraction: PaperExtractionResult) -> dict:
     relations: list[dict] = []
 
     paper_id = extraction.paper.paper_id or f"paper_{extraction.document_id}"
+    paper_properties = {
+        **extraction.paper.model_dump(),
+        "paper_embedding": extraction.paper_embedding,
+        "taxonomy_version": extraction.taxonomy_version,
+    }
     entities.append(
         {
             "id": paper_id,
             "type": "Paper",
-            "properties": extraction.paper.model_dump(),
+            "properties": paper_properties,
         }
     )
 

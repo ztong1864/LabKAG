@@ -74,3 +74,64 @@ def test_neo4j_graph_store_writes_entities_and_relations():
     assert fake_driver.fake_session.queries[1][1]["properties"]["extra"] == '{"nested": true}'
     assert "MERGE (s)-[r:`supportedBy`]->(t)" in fake_driver.fake_session.queries[2][0]
     assert fake_driver.closed is True
+
+
+def test_neo4j_graph_store_flattens_tags_into_scalar_properties():
+    fake_driver = FakeDriver()
+    store = Neo4jGraphStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    store.write_graph(
+        {
+            "entities": [
+                {
+                    "id": "res_001",
+                    "type": "Result",
+                    "properties": {
+                        "description": "Iron catalyzed the reaction.",
+                        "tags": {"catalyst_type": "iron", "reaction-type": "oxidation"},
+                    },
+                },
+            ],
+            "relations": [],
+        },
+        project_id="labkag_demo",
+    )
+
+    properties = fake_driver.fake_session.queries[0][1]["properties"]
+    assert properties["tag_catalyst_type"] == "iron"
+    assert properties["tag_reaction_type"] == "oxidation"
+    assert "tags" not in properties
+
+
+def test_neo4j_graph_store_passes_float_list_properties_through_unmodified():
+    fake_driver = FakeDriver()
+    store = Neo4jGraphStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    store.write_graph(
+        {
+            "entities": [
+                {
+                    "id": "paper_001",
+                    "type": "Paper",
+                    "properties": {"paper_embedding": [0.1, 0.2, 0.3]},
+                },
+            ],
+            "relations": [],
+        },
+        project_id="labkag_demo",
+    )
+
+    properties = fake_driver.fake_session.queries[0][1]["properties"]
+    assert properties["paper_embedding"] == [0.1, 0.2, 0.3]
