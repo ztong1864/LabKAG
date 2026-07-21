@@ -17,6 +17,8 @@ FAILURE_STATES = {"failed", "error"}
 TERMINAL_STATES = SUCCESS_STATES | FAILURE_STATES
 MIN_MARKDOWN_CHARS = 200
 DEFAULT_BATCH_SIZE = 20
+NETWORK_RETRY_ATTEMPTS = 3
+NETWORK_RETRY_BACKOFF_SECONDS = 5.0
 
 
 class MinerUError(RuntimeError):
@@ -72,6 +74,22 @@ def _output_paths(output_dir: Path, slug: str) -> tuple[Path, Path, Path]:
     return raw_zip, extracted_dir, markdown_path
 
 
+def _with_retries(call, *, attempts: int = NETWORK_RETRY_ATTEMPTS):
+    """Retry a network call a few times on transient connection failures
+    (dropped connections, timeouts) so one flaky request doesn't kill an
+    hours-long batch run. HTTP error responses (4xx/5xx already raised via
+    raise_for_status) are not retried -- only connection-level failures."""
+    last_exc: requests.exceptions.RequestException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            last_exc = exc
+            if attempt < attempts:
+                time.sleep(NETWORK_RETRY_BACKOFF_SECONDS)
+    raise last_exc
+
+
 class MinerUClient:
     def __init__(
         self,
@@ -99,12 +117,12 @@ class MinerUClient:
         return {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
 
     def _post(self, session: requests.Session, path: str, payload: dict) -> dict:
-        response = session.post(
+        response = _with_retries(lambda: session.post(
             f"{self.base_url}{path}",
             headers=self._headers(),
             json=payload,
             timeout=60,
-        )
+        ))
         response.raise_for_status()
         data = response.json()
         if data.get("code") != 0:
@@ -112,11 +130,11 @@ class MinerUClient:
         return data
 
     def _get(self, session: requests.Session, path: str) -> dict:
-        response = session.get(
+        response = _with_retries(lambda: session.get(
             f"{self.base_url}{path}",
             headers={"Authorization": f"Bearer {self.token}"},
             timeout=60,
-        )
+        ))
         response.raise_for_status()
         data = response.json()
         if data.get("code") != 0:
@@ -223,10 +241,14 @@ class MinerUClient:
                 f"{len(pdf_paths)} files, batch_id={batch_id!r}."
             )
 
-        for pdf_path, upload_url in zip(pdf_paths, upload_urls):
-            with pdf_path.open("rb") as handle:
-                resp = requests.put(upload_url, data=handle, timeout=300)
-            resp.raise_for_status()
+        for pdf_path, upload_url in zip(pdf_paths, upload_urls, strict=True):
+
+            def _upload_once(pdf_path=pdf_path, upload_url=upload_url):
+                with pdf_path.open("rb") as handle:
+                    resp = requests.put(upload_url, data=handle, timeout=300)
+                resp.raise_for_status()
+
+            _with_retries(_upload_once)
             if on_progress:
                 on_progress(f"[upload] {pdf_path.name}")
 
@@ -256,7 +278,9 @@ class MinerUClient:
                 )
                 continue
             try:
-                artifacts = self._materialize_from_zip_url(pdf_path, output_dir, slug, zip_url, force)
+                artifacts = self._materialize_from_zip_url(
+                    pdf_path, output_dir, slug, zip_url, force
+                )
                 results[pdf_path] = MinerUBatchResult(
                     pdf_path=pdf_path, slug=slug, state="done", artifacts=artifacts
                 )
@@ -297,7 +321,8 @@ class MinerUClient:
                 if not active:
                     return final_results
             time.sleep(max(1, self.poll_interval))
-        raise MinerUError(f"MinerU batch {batch_id} timed out after {self.timeout_seconds // 60} minutes.")
+        minutes = self.timeout_seconds // 60
+        raise MinerUError(f"MinerU batch {batch_id} timed out after {minutes} minutes.")
 
     # ---- shared helpers ----
 
@@ -375,9 +400,12 @@ class MinerUClient:
         if not batch_id:
             raise MinerUError("MinerU did not return a batch_id.")
 
-        with pdf_path.open("rb") as handle:
-            resp = requests.put(upload_urls[0], data=handle, timeout=300)
-        resp.raise_for_status()
+        def _upload_once():
+            with pdf_path.open("rb") as handle:
+                resp = requests.put(upload_urls[0], data=handle, timeout=300)
+            resp.raise_for_status()
+
+        _with_retries(_upload_once)
 
         final = self._poll_batch(session, batch_id, {data_id}, None)
         item = final.get(data_id) or {}
@@ -405,12 +433,16 @@ class MinerUClient:
     @staticmethod
     def _download_binary(url: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with requests.get(url, stream=True, timeout=300) as response:
-            response.raise_for_status()
-            with dest.open("wb") as handle:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        handle.write(chunk)
+
+        def _download_once():
+            with requests.get(url, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                with dest.open("wb") as handle:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            handle.write(chunk)
+
+        _with_retries(_download_once)
 
 
 def configured_mineru_client() -> MinerUClient | None:

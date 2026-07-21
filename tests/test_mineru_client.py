@@ -2,7 +2,10 @@ import shutil
 import zipfile
 from pathlib import Path
 
-from app.adapters.mineru_client import MIN_MARKDOWN_CHARS, MinerUClient
+import pytest
+import requests
+
+from app.adapters.mineru_client import MIN_MARKDOWN_CHARS, MinerUClient, _with_retries
 
 
 class FakeMinerUClient(MinerUClient):
@@ -58,3 +61,73 @@ def test_materialize_retries_mineru_when_cached_markdown_is_too_short(tmp_path: 
     assert len(client.upload_calls) == 1
     assert artifacts.markdown == fresh_markdown
     assert markdown_path.read_text(encoding="utf-8") == fresh_markdown
+
+
+def test_with_retries_returns_immediately_on_success():
+    calls = []
+
+    def succeed():
+        calls.append(1)
+        return "ok"
+
+    assert _with_retries(succeed) == "ok"
+    assert len(calls) == 1
+
+
+def test_with_retries_recovers_after_transient_connection_error(monkeypatch):
+    monkeypatch.setattr("app.adapters.mineru_client.time.sleep", lambda _: None)
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise requests.exceptions.ConnectionError("dropped")
+        return "recovered"
+
+    assert _with_retries(flaky) == "recovered"
+    assert len(attempts) == 3
+
+
+def test_with_retries_raises_after_exhausting_attempts(monkeypatch):
+    monkeypatch.setattr("app.adapters.mineru_client.time.sleep", lambda _: None)
+    attempts = []
+
+    def always_fails():
+        attempts.append(1)
+        raise requests.exceptions.ConnectionError("still down")
+
+    with pytest.raises(requests.exceptions.ConnectionError, match="still down"):
+        _with_retries(always_fails)
+    assert len(attempts) == 3
+
+
+def test_download_binary_retries_on_transient_connection_error(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.adapters.mineru_client.time.sleep", lambda _: None)
+    call_count = {"n": 0}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            yield b"zip-bytes"
+
+    def fake_get(url, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] < 2:
+            raise requests.exceptions.ConnectionError("dropped mid-download")
+        return FakeResponse()
+
+    monkeypatch.setattr("app.adapters.mineru_client.requests.get", fake_get)
+    dest = tmp_path / "out.zip"
+
+    MinerUClient._download_binary("https://example.test/file.zip", dest)
+
+    assert call_count["n"] == 2
+    assert dest.read_bytes() == b"zip-bytes"
