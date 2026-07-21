@@ -65,6 +65,56 @@ def _make_pdf(path: Path, text: str = "LabKAG API paper\nResults are evidence bo
     document.close()
 
 
+class FakeListPapersQueryStore:
+    def __init__(self, papers):
+        self.papers = papers
+        self.calls = []
+
+    def list_papers(self, project_id, limit=None, offset=0):
+        self.calls.append({"project_id": project_id, "limit": limit, "offset": offset})
+        return self.papers
+
+
+def test_list_papers_route_strips_paper_embedding(monkeypatch):
+    import app.api.papers as papers_module
+
+    fake_store = FakeListPapersQueryStore(
+        [
+            {"id": "paper_001", "title": "Iron paper", "paper_embedding": [0.1, 0.2]},
+            {"id": "paper_002", "title": "Copper paper"},
+        ]
+    )
+    monkeypatch.setattr(papers_module, "build_query_store", lambda: fake_store)
+    client = TestClient(app)
+
+    response = client.get("/v1/papers", params={"project_id": "proj_1"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    papers = body["data"]["papers"]
+    assert papers[0]["title"] == "Iron paper"
+    assert "paper_embedding" not in papers[0]
+    assert "paper_embedding" not in papers[1]
+    assert fake_store.calls == [{"project_id": "proj_1", "limit": None, "offset": 0}]
+
+
+def test_list_papers_route_surfaces_graph_query_failed(monkeypatch):
+    import app.api.papers as papers_module
+    from app.adapters.query_store_factory import QueryStoreFactoryError
+
+    def _raise():
+        raise QueryStoreFactoryError("NEO4J_PASSWORD is required when GRAPH_BACKEND=neo4j.")
+
+    monkeypatch.setattr(papers_module, "build_query_store", _raise)
+    client = TestClient(app)
+
+    response = client.get("/v1/papers", params={"project_id": "proj_1"})
+
+    assert response.status_code == 502
+    assert response.json()["errors"][0]["code"] == "graph_query_failed"
+
+
 def test_upload_accepts_pdf_and_rejects_non_pdf(tmp_path: Path):
     client = TestClient(app)
     pdf_path = tmp_path / "paper.pdf"

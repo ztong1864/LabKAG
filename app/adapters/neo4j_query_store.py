@@ -13,6 +13,13 @@ class EvidenceSearchResult:
     score: float = 0
 
 
+@dataclass
+class PaperEntityRow:
+    paper_id: str
+    paper_properties: dict[str, Any] = field(default_factory=dict)
+    entities: list[dict[str, Any]] = field(default_factory=list)
+
+
 class Neo4jQueryStore:
     VECTOR_INDEX_NAME = "labkag_evidence_embedding_index"
 
@@ -105,6 +112,88 @@ class Neo4jQueryStore:
         WHERE e.project_id = $project_id AND e[removal.property] = removal.value
         RETURN DISTINCT p.id AS paper_id
         """
+
+    def list_papers(
+        self, project_id: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        driver = self.driver_factory(self.uri, auth=(self.user, self.password))
+        try:
+            with driver.session(database=self.database) as session:
+                params: dict[str, Any] = {"project_id": project_id, "offset": offset}
+                if limit is not None:
+                    params["limit"] = limit
+                records = session.run(self._list_papers_cypher(limit is not None), **params)
+                return [
+                    (record.data() if hasattr(record, "data") else dict(record))["paper"]
+                    for record in records
+                ]
+        finally:
+            driver.close()
+
+    @staticmethod
+    def _list_papers_cypher(has_limit: bool) -> str:
+        limit_clause = "LIMIT $limit" if has_limit else ""
+        return f"""
+        MATCH (p:Paper)
+        WHERE p.project_id = $project_id
+        RETURN properties(p) AS paper
+        ORDER BY p.id
+        SKIP $offset
+        {limit_clause}
+        """
+
+    def fetch_entities_for_topic_matching(
+        self, project_id: str, limit: int = 5000, offset: int = 0
+    ) -> list[PaperEntityRow]:
+        """One graph-wide row per paper, each carrying every entity attached
+        to it via the standard relation types, with the evidence_ids each
+        entity cites (via supportedBy) so topic_matcher can detect
+        co-occurrence through shared evidence. `limit` here is a safety cap
+        on the fetch itself, unrelated to any confirmed/borderline result
+        limit a caller applies afterward."""
+        driver = self.driver_factory(self.uri, auth=(self.user, self.password))
+        try:
+            with driver.session(database=self.database) as session:
+                records = session.run(
+                    self._fetch_entities_for_topic_matching_cypher(),
+                    project_id=project_id,
+                    offset=offset,
+                    limit=limit,
+                )
+                return [self._record_to_paper_entity_row(record) for record in records]
+        finally:
+            driver.close()
+
+    @staticmethod
+    def _fetch_entities_for_topic_matching_cypher() -> str:
+        return """
+        MATCH (p:Paper)
+        WHERE p.project_id = $project_id
+        OPTIONAL MATCH (p)-[rel:proposes|uses|hasCondition|measures|reports|drawsConclusion]->(e)
+        WHERE e IS NULL OR e.project_id = $project_id
+        OPTIONAL MATCH (e)-[:supportedBy]->(ev:Evidence)
+        WITH p, e, rel, collect(DISTINCT ev.evidence_id) AS evidence_ids
+        WITH p, collect(
+          CASE WHEN e IS NULL THEN NULL ELSE {
+            entity_id: e.id, entity_type: labels(e)[0], relation: type(rel),
+            properties: properties(e), evidence_ids: evidence_ids
+          } END
+        ) AS raw_entities
+        RETURN p.id AS paper_id, properties(p) AS paper_properties,
+               [x IN raw_entities WHERE x IS NOT NULL] AS entities
+        ORDER BY p.id
+        SKIP $offset
+        LIMIT $limit
+        """
+
+    @classmethod
+    def _record_to_paper_entity_row(cls, record: Any) -> PaperEntityRow:
+        data = record.data() if hasattr(record, "data") else dict(record)
+        return PaperEntityRow(
+            paper_id=data.get("paper_id", ""),
+            paper_properties=data.get("paper_properties") or {},
+            entities=data.get("entities") or [],
+        )
 
     @staticmethod
     def _default_driver_factory(uri: str, auth: tuple[str, str]):

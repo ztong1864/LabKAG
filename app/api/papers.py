@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, UploadFile
 
+from app.adapters.query_store_factory import build_query_store
 from app.schemas.errors import ErrorCode
 from app.schemas.paper import ExtractPaperRequest, IngestPaperRequest
 from app.services.skill_orchestrator import (
@@ -14,6 +15,18 @@ from app.storage.file_store import UnsupportedFileTypeError, file_store
 from app.storage.metadata_store import metadata_store
 
 router = APIRouter(prefix="/v1/papers", tags=["papers"])
+
+
+@router.get("")
+def list_papers_route(project_id: str, limit: int | None = None, offset: int = 0):
+    try:
+        query_store = build_query_store()
+        papers = query_store.list_papers(project_id, limit=limit, offset=offset)
+    except RuntimeError as exc:
+        raise error_response(502, ErrorCode.GRAPH_QUERY_FAILED, str(exc)) from exc
+    for paper in papers:
+        paper.pop("paper_embedding", None)
+    return success_response(data={"papers": papers}, project_id=project_id)
 
 
 @router.post("/upload")

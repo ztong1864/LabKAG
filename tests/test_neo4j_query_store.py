@@ -178,3 +178,88 @@ def test_count_papers_with_tag_values_returns_zero_without_removals():
 
     assert count == 0
     assert fake_driver.fake_session.queries == []
+
+
+def test_list_papers_returns_properties_and_omits_limit_when_none():
+    fake_driver = FakeDriver(
+        [
+            FakeRecord(paper={"id": "paper_001", "title": "First"}),
+            FakeRecord(paper={"id": "paper_002", "title": "Second"}),
+        ]
+    )
+    store = Neo4jQueryStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    papers = store.list_papers("proj_1")
+
+    assert papers == [
+        {"id": "paper_001", "title": "First"},
+        {"id": "paper_002", "title": "Second"},
+    ]
+    query, params = fake_driver.fake_session.queries[0]
+    assert "LIMIT" not in query
+    assert "limit" not in params
+    assert params == {"project_id": "proj_1", "offset": 0}
+    assert fake_driver.closed is True
+
+
+def test_list_papers_includes_limit_and_offset_when_given():
+    fake_driver = FakeDriver([])
+    store = Neo4jQueryStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    store.list_papers("proj_1", limit=10, offset=5)
+
+    query, params = fake_driver.fake_session.queries[0]
+    assert "LIMIT $limit" in query
+    assert params == {"project_id": "proj_1", "offset": 5, "limit": 10}
+
+
+def test_fetch_entities_for_topic_matching_shapes_rows():
+    fake_driver = FakeDriver(
+        [
+            FakeRecord(
+                paper_id="paper_001",
+                paper_properties={"id": "paper_001", "title": "Iron paper"},
+                entities=[
+                    {
+                        "entity_id": "material_001",
+                        "entity_type": "Material",
+                        "relation": "uses",
+                        "properties": {"tag_catalyst_type": "iron"},
+                        "evidence_ids": ["ev_001"],
+                    }
+                ],
+            )
+        ]
+    )
+    store = Neo4jQueryStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    rows = store.fetch_entities_for_topic_matching("proj_1")
+
+    assert len(rows) == 1
+    assert rows[0].paper_id == "paper_001"
+    assert rows[0].paper_properties["title"] == "Iron paper"
+    assert rows[0].entities[0]["entity_id"] == "material_001"
+    assert rows[0].entities[0]["evidence_ids"] == ["ev_001"]
+    query, params = fake_driver.fake_session.queries[0]
+    assert "OPTIONAL MATCH (e)-[:supportedBy]->(ev:Evidence)" in query
+    assert "proposes|uses|hasCondition|measures|reports|drawsConclusion" in query
+    assert params == {"project_id": "proj_1", "offset": 0, "limit": 5000}
+    assert fake_driver.closed is True
