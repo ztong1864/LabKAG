@@ -133,3 +133,48 @@ def test_neo4j_query_store_uses_vector_index_when_query_embedding_is_provided():
     assert "VECTOR INDEX labkag_evidence_embedding_index" in query
     assert params["query_embedding"] == [0.1, 0.2, 0.3]
     assert params["limit"] == 5
+
+
+def test_count_papers_with_tag_values_counts_distinct_papers():
+    fake_driver = FakeDriver(
+        [
+            FakeRecord(paper_id="paper_001"),
+            FakeRecord(paper_id="paper_002"),
+            FakeRecord(paper_id="paper_001"),
+        ]
+    )
+    store = Neo4jQueryStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    count = store.count_papers_with_tag_values(
+        "proj_1", [{"property": "tag_catalyst_type", "value": "mercury"}]
+    )
+
+    assert count == 2
+    query, params = fake_driver.fake_session.queries[0]
+    assert "UNWIND $removals AS removal" in query
+    assert "e[removal.property] = removal.value" in query
+    assert params["project_id"] == "proj_1"
+    assert params["removals"] == [{"property": "tag_catalyst_type", "value": "mercury"}]
+    assert fake_driver.closed is True
+
+
+def test_count_papers_with_tag_values_returns_zero_without_removals():
+    fake_driver = FakeDriver([])
+    store = Neo4jQueryStore(
+        uri="neo4j://localhost:7687",
+        user="neo4j",
+        password="secret",
+        database="neo4j",
+        driver_factory=lambda uri, auth: fake_driver,
+    )
+
+    count = store.count_papers_with_tag_values("proj_1", [])
+
+    assert count == 0
+    assert fake_driver.fake_session.queries == []

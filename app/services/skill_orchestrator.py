@@ -7,7 +7,7 @@ from app.config import settings
 from app.schemas.common import SkillMetadata
 from app.schemas.errors import ErrorCode, SkillError
 from app.schemas.paper import ExtractPaperRequest, IngestPaperRequest
-from app.schemas.response import SkillResponse
+from app.schemas.response import SkillResponse, SkillStatus
 from app.services.chunker import chunk_pages
 from app.services.embedding_service import attach_evidence_embeddings
 from app.services.evidence_binder import bind_required_evidence
@@ -36,9 +36,10 @@ def success_response(
     project_id: str | None = None,
     evidence: list | None = None,
     warnings: list[str] | None = None,
+    status: SkillStatus = "success",
 ) -> SkillResponse:
     return SkillResponse(
-        status="success",
+        status=status,
         data=data,
         evidence=evidence or [],
         warnings=warnings or [],

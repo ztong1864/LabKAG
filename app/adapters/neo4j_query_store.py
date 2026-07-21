@@ -71,6 +71,41 @@ class Neo4jQueryStore:
         finally:
             driver.close()
 
+    def count_papers_with_tag_values(
+        self, project_id: str, removals: list[dict[str, str]]
+    ) -> int:
+        """Count distinct papers that have an entity tagged with any of the
+        given removed/renamed values, for taxonomy-edit breaking-change
+        detection. `removals` is a list of {"property": "tag_<category>",
+        "value": <value>} dicts."""
+        if not removals:
+            return 0
+        driver = self.driver_factory(self.uri, auth=(self.user, self.password))
+        try:
+            with driver.session(database=self.database) as session:
+                records = session.run(
+                    self._count_papers_with_tag_values_cypher(),
+                    project_id=project_id,
+                    removals=removals,
+                )
+                paper_ids = {
+                    (record.data() if hasattr(record, "data") else dict(record))["paper_id"]
+                    for record in records
+                }
+                return len(paper_ids)
+        finally:
+            driver.close()
+
+    @staticmethod
+    def _count_papers_with_tag_values_cypher() -> str:
+        return """
+        UNWIND $removals AS removal
+        MATCH (p:Paper {project_id: $project_id})
+              -[:proposes|uses|hasCondition|measures|reports|drawsConclusion]->(e)
+        WHERE e.project_id = $project_id AND e[removal.property] = removal.value
+        RETURN DISTINCT p.id AS paper_id
+        """
+
     @staticmethod
     def _default_driver_factory(uri: str, auth: tuple[str, str]):
         try:

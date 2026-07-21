@@ -42,6 +42,7 @@ data/uploads/
 data/parsed/
 data/parsed_backup/
 data/extractions/
+data/taxonomies/
 
 # Local databases
 *.sqlite
