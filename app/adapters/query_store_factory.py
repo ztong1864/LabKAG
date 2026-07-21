@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.adapters.neo4j_query_store import Neo4jQueryStore
+from app.adapters.sqlite_query_store import SQLiteQueryStore
 from app.config import Settings, settings
 
 
@@ -10,6 +11,10 @@ class QueryStoreFactoryError(RuntimeError):
 
 def build_query_store(config: Settings = settings) -> Any:
     backend = config.graph_backend.lower()
+    if backend == "sqlite":
+        return SQLiteQueryStore(
+            db_path=config.sqlite_db_path, embedding_dim=config.embedding_dim
+        )
     if backend != "neo4j":
         raise QueryStoreFactoryError(f"Unsupported GRAPH_BACKEND: {config.graph_backend}")
 

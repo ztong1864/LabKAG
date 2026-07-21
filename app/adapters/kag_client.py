@@ -2,7 +2,7 @@ import inspect
 from typing import Any
 
 from app.adapters.embedding_client import configured_embedding_client
-from app.adapters.neo4j_query_store import Neo4jQueryStore
+from app.adapters.query_store_factory import build_query_store
 from app.config import settings
 from app.schemas.evidence import Evidence
 
@@ -57,16 +57,7 @@ class KAGClient:
     def _query_store(self) -> Any:
         if self.query_store is not None:
             return self.query_store
-        if settings.graph_backend != "neo4j":
-            raise RuntimeError("Real KAG query requires GRAPH_BACKEND=neo4j for v0.1.")
-        if not settings.neo4j_password:
-            raise RuntimeError("NEO4J_PASSWORD is required for real KAG query.")
-        self.query_store = Neo4jQueryStore(
-            uri=settings.neo4j_uri,
-            user=settings.neo4j_user,
-            password=settings.neo4j_password,
-            database=settings.neo4j_database,
-        )
+        self.query_store = build_query_store()
         return self.query_store
 
     def _query_embedding(self, text: str) -> list[float] | None:

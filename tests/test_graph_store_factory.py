@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 from app.adapters.graph_store_factory import GraphStoreFactoryError, build_graph_store
 from app.adapters.neo4j_graph_store import Neo4jGraphStore
+from app.adapters.sqlite_graph_store import SQLiteGraphStore
 from app.config import Settings
 
 
@@ -35,3 +38,16 @@ def test_build_graph_store_rejects_unknown_backend():
 
     with pytest.raises(GraphStoreFactoryError, match="Unsupported GRAPH_BACKEND"):
         build_graph_store(settings)
+
+
+def test_build_graph_store_returns_sqlite_store_without_neo4j_password(tmp_path: Path):
+    settings = Settings(
+        graph_backend="sqlite",
+        sqlite_db_path=tmp_path / "graph.db",
+        neo4j_password=None,
+    )
+
+    store = build_graph_store(settings)
+
+    assert isinstance(store, SQLiteGraphStore)
+    assert store.db_path == tmp_path / "graph.db"
