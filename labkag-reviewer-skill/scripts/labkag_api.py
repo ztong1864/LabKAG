@@ -36,6 +36,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         "extract_level": args.extract_level,
         "return_chunks": args.return_chunks,
         "use_backup": args.use_backup,
+        "mineru_output_dir": args.mineru_output_dir,
     }
     return _print_json_response("POST", f"{args.base_url}/v1/papers/extract", json_payload=payload)
 
@@ -189,6 +190,9 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--return-chunks", action="store_true")
     extract.add_argument("--use-backup", action="store_true",
                          help="Use PyMuPDF backup (data/parsed_backup/) instead of MinerU output.")
+    extract.add_argument("--mineru-output-dir",
+                         help="Override MinerU output directory for this call "
+                              "(default: server's PARSED_DIR setting).")
     extract.set_defaults(func=cmd_extract)
 
     ingest = subparsers.add_parser("ingest")

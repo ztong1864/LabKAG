@@ -11,6 +11,7 @@ class ExtractPaperRequest(BaseModel):
     extract_level: Literal["basic", "detailed"] = "basic"
     return_chunks: bool = False
     use_backup: bool = False
+    mineru_output_dir: str | None = None
 
 
 class IngestPaperRequest(BaseModel):

@@ -70,7 +70,12 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
         raise error_response(404, ErrorCode.FILE_NOT_FOUND, str(exc)) from exc
 
     document_id = new_id("doc")
-    document = parse_pdf(pdf_path, document_id=document_id, use_backup=request.use_backup)
+    document = parse_pdf(
+        pdf_path,
+        document_id=document_id,
+        use_backup=request.use_backup,
+        mineru_output_dir=request.mineru_output_dir,
+    )
     document.chunks = chunk_pages(document.document_id, document.pages)
     chat_client = configured_chat_client()
     if chat_client is None:

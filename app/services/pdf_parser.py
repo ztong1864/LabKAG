@@ -14,6 +14,7 @@ def parse_pdf(
     path: Path | str,
     document_id: str,
     use_backup: bool = False,
+    mineru_output_dir: Path | str | None = None,
 ) -> ParsedDocument:
     """Parse a PDF using MinerU (if configured) with PyMuPDF fallback.
 
@@ -22,6 +23,10 @@ def parse_pdf(
 
     If use_backup=True, reads directly from parsed_backup_dir (PyMuPDF output)
     without calling MinerU.
+
+    mineru_output_dir overrides settings.parsed_dir for this call only, so
+    different projects/batches can target different MinerU output locations
+    without restarting the server.
     """
     pdf_path = Path(path)
     if not pdf_path.exists():
@@ -36,7 +41,9 @@ def parse_pdf(
     client = configured_mineru_client()
     if client is not None:
         try:
-            output_dir = Path(settings.parsed_dir)
+            output_dir = (
+                Path(mineru_output_dir) if mineru_output_dir else Path(settings.parsed_dir)
+            )
             artifacts = client.materialize(pdf_path, output_dir)
             if len(artifacts.markdown.strip()) >= _MINERU_MIN_CHARS:
                 return _document_from_markdown(artifacts.markdown, document_id, pdf_path.name)
