@@ -115,6 +115,125 @@ def test_list_papers_route_surfaces_graph_query_failed(monkeypatch):
     assert response.json()["errors"][0]["code"] == "graph_query_failed"
 
 
+class FakeMatchQueryStore:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def fetch_entities_for_topic_matching(self, project_id):
+        return self.rows
+
+
+def test_match_topic_route_returns_404_when_taxonomy_not_configured():
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/papers/match-topic",
+        json={
+            "project_id": "no_taxonomy_proj",
+            "plan": {
+                "topic": "iron catalysis",
+                "project_id": "no_taxonomy_proj",
+                "concepts": [],
+            },
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["code"] == "taxonomy_not_configured"
+
+
+def test_match_topic_route_returns_422_when_no_essential_concepts_resolve():
+    taxonomy_store.save_taxonomy(
+        "proj_match",
+        ProjectTaxonomy(
+            project_id="proj_match",
+            categories=[TaxonomyCategory(key="catalyst_type", allowed_values=["iron"])],
+        ).model_dump(mode="json"),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/papers/match-topic",
+        json={
+            "project_id": "proj_match",
+            "plan": {
+                "topic": "mercury catalysis",
+                "project_id": "proj_match",
+                "concepts": [
+                    {"category": "catalyst_type", "value": "mercury", "essential": True}
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["errors"][0]["code"] == "topic_unresolved"
+
+
+def test_match_topic_route_returns_confirmed_and_borderline_tiers(monkeypatch):
+    import app.api.papers as papers_module
+
+    taxonomy_store.save_taxonomy(
+        "proj_match2",
+        ProjectTaxonomy(
+            project_id="proj_match2",
+            categories=[
+                TaxonomyCategory(key="catalyst_type", allowed_values=["iron"]),
+                TaxonomyCategory(key="reaction_type", allowed_values=["oxidation"]),
+            ],
+        ).model_dump(mode="json"),
+    )
+    rows = [
+        {
+            "paper_id": "confirmed_paper",
+            "paper_properties": {"title": "Confirmed"},
+            "entities": [
+                {
+                    "entity_id": "m1",
+                    "entity_type": "Material",
+                    "properties": {"tag_catalyst_type": "iron"},
+                    "evidence_ids": [],
+                },
+                {
+                    "entity_id": "c1",
+                    "entity_type": "Condition",
+                    "properties": {"tag_reaction_type": "oxidation"},
+                    "evidence_ids": [],
+                },
+            ],
+        }
+    ]
+
+    from app.adapters.neo4j_query_store import PaperEntityRow
+
+    fake_store = FakeMatchQueryStore([PaperEntityRow(**row) for row in rows])
+    monkeypatch.setattr(papers_module, "build_query_store", lambda: fake_store)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/papers/match-topic",
+        json={
+            "project_id": "proj_match2",
+            "plan": {
+                "topic": "iron oxidation",
+                "project_id": "proj_match2",
+                "concepts": [
+                    {"category": "catalyst_type", "value": "iron", "essential": True},
+                    {"category": "reaction_type", "value": "oxidation", "essential": True},
+                ],
+            },
+            "min_essential_signals": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert len(body["data"]["confirmed"]) == 1
+    assert body["data"]["confirmed"][0]["paper_id"] == "confirmed_paper"
+    assert body["data"]["summary"]["candidates_scanned"] == 1
+
+
 def test_upload_accepts_pdf_and_rejects_non_pdf(tmp_path: Path):
     client = TestClient(app)
     pdf_path = tmp_path / "paper.pdf"
