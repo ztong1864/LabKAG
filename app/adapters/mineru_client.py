@@ -16,6 +16,7 @@ import requests
 SUCCESS_STATES = {"done", "success", "finished", "completed"}
 FAILURE_STATES = {"failed", "error"}
 TERMINAL_STATES = SUCCESS_STATES | FAILURE_STATES
+MIN_MARKDOWN_CHARS = 200
 
 
 class MinerUError(RuntimeError):
@@ -125,17 +126,18 @@ class MinerUClient:
         markdown_path = output_dir / "markdown" / f"{slug}.md"
 
         if markdown_path.exists() and not force:
-            # Already parsed — read from disk
             markdown = markdown_path.read_text(encoding="utf-8")
-            full_md = extracted_dir / "full.md"
-            return MinerUArtifacts(
-                slug=slug,
-                raw_zip=raw_zip,
-                extracted_dir=extracted_dir,
-                full_md=full_md,
-                markdown_copy=markdown_path,
-                markdown=markdown,
-            )
+            # Only use cached result if it has enough content; otherwise re-upload
+            if len(markdown.strip()) >= MIN_MARKDOWN_CHARS:
+                full_md = extracted_dir / "full.md"
+                return MinerUArtifacts(
+                    slug=slug,
+                    raw_zip=raw_zip,
+                    extracted_dir=extracted_dir,
+                    full_md=full_md,
+                    markdown_copy=markdown_path,
+                    markdown=markdown,
+                )
 
         session = requests.Session()
         try:
