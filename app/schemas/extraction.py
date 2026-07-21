@@ -19,6 +19,7 @@ class EvidenceBoundItem(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     needs_review: bool = False
     inferred: bool = False
+    tags: dict[str, str] = Field(default_factory=dict)
 
 
 class ExtractedMethod(EvidenceBoundItem):
@@ -79,3 +80,5 @@ class PaperExtractionResult(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     extractor_version: str = "v0.1"
     created_at: str = ""
+    paper_embedding: list[float] | None = None
+    taxonomy_version: int | None = None

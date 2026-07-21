@@ -14,6 +14,9 @@ class ErrorCode(str, Enum):
     EVIDENCE_BINDING_FAILED = "evidence_binding_failed"
     GRAPH_WRITE_FAILED = "graph_write_failed"
     KAG_QUERY_FAILED = "kag_query_failed"
+    GRAPH_QUERY_FAILED = "graph_query_failed"
+    TAXONOMY_NOT_CONFIGURED = "taxonomy_not_configured"
+    TOPIC_UNRESOLVED = "topic_unresolved"
     INTERNAL_ERROR = "internal_error"
 
 
