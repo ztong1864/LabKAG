@@ -80,3 +80,8 @@ def test_ingest_paper_attaches_evidence_embeddings_when_enabled(monkeypatch):
     assert evidence_entities[0]["properties"]["embedding"] == [0.1, 0.2, 0.3]
     assert evidence_entities[0]["properties"]["embedding_model"] == "text-embedding-3-small"
     assert evidence_entities[0]["properties"]["embedding_dim"] == 3
+
+    paper_entity = next(
+        entity for entity in captured["graph_payload"]["entities"] if entity["type"] == "Paper"
+    )
+    assert paper_entity["properties"]["paper_embedding"] == [0.1, 0.2, 0.3]

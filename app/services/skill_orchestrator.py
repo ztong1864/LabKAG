@@ -10,7 +10,7 @@ from app.schemas.paper import ExtractPaperRequest, IngestPaperRequest
 from app.schemas.response import SkillResponse, SkillStatus
 from app.schemas.taxonomy import ProjectTaxonomy
 from app.services.chunker import chunk_pages
-from app.services.embedding_service import attach_evidence_embeddings
+from app.services.embedding_service import attach_evidence_embeddings, attach_paper_embedding
 from app.services.evidence_binder import bind_required_evidence
 from app.services.paper_extractor import (
     ExtractionError,
@@ -122,6 +122,11 @@ def ingest_paper(request: IngestPaperRequest) -> SkillResponse:
                 "Embedding provider is not configured.",
             )
         attach_evidence_embeddings(
+            request.paper_extraction,
+            embedding_client,
+            model=settings.embedding_model,
+        )
+        attach_paper_embedding(
             request.paper_extraction,
             embedding_client,
             model=settings.embedding_model,
