@@ -42,6 +42,35 @@ Override with `--base-url` or `LABKAG_BASE_URL`.
 - `taxonomy-get --project-id <id>`
 - `taxonomy-set --project-id <id> --taxonomy <json-file> [--confirm]`
 - `match-topic --project-id <id> --plan <json-file> [--min-essential-signals N] [--no-borderline] [--limit N]`
+- `batch-extract --input-dir <folder> --extractions-dir <folder> --project-id <id> [--extract-level basic|detailed] [--mineru-output-dir <dir>] [--limit N] [--force]`
+- `batch-ingest --extractions-dir <folder> --project-id <id> [--limit N] [--force]`
+
+## Batch Extraction & Ingestion
+
+For processing many PDFs at once. Both commands are resumable: they write a
+manifest after every paper and skip already-succeeded ones on re-run
+(`--force` reprocesses anyway).
+
+`batch-extract` uploads and extracts every PDF under `--input-dir`, caching
+each successful `paper_extraction` JSON in `--extractions-dir` **on this
+machine** — not assumed to share a filesystem with wherever the backend
+runs, since this skill may be calling a remote `--base-url`. Pass
+`--mineru-output-dir` to reuse a pre-parsed MinerU batch (see
+`mineru_batch_parse.py` in the LabKAG repo) instead of re-parsing.
+
+`batch-ingest` reads every `paper_extraction` JSON cached by a prior
+`batch-extract` run from `--extractions-dir` and ingests each one via
+`POST /v1/papers/ingest?confirm=true`.
+
+Typical flow:
+
+```text
+batch-extract --input-dir <pdfs> --extractions-dir <cache> --project-id <id>
+batch-ingest  --extractions-dir <cache> --project-id <id>
+```
+
+Run `batch-extract` again any time to pick up newly added PDFs — it only
+processes what's not already in its manifest.
 
 ## Minimal Rules
 

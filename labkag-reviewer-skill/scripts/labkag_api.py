@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import requests
@@ -116,6 +117,178 @@ def cmd_match_topic(args: argparse.Namespace) -> int:
         payload["limit"] = args.limit
     url = f"{args.base_url}/v1/papers/match-topic"
     return _print_json_response("POST", url, json_payload=payload, timeout=args.timeout)
+
+
+def _load_manifest(path: Path) -> dict:
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {"papers": {}}
+
+
+def _write_manifest(path: Path, manifest: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _with_retries(base_url: str, action_name: str, attempt_fn, max_attempts: int, retry_delay: float):
+    last_error = ""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return attempt_fn(), None
+        except requests.HTTPError as exc:
+            last_error = f"HTTP {exc.response.status_code}: {exc.response.text[:300]}"
+        except requests.RequestException as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+        print(f"  [retry {attempt}/{max_attempts}] {action_name}: {last_error}")
+        if attempt < max_attempts:
+            time.sleep(retry_delay)
+    return None, last_error
+
+
+def cmd_batch_extract(args: argparse.Namespace) -> int:
+    """Upload + extract every PDF in --input-dir, caching each successful
+    paper_extraction JSON locally under --extractions-dir (on this machine,
+    not assumed to share a filesystem with the backend) so batch-ingest can
+    read it back later without re-extracting."""
+    input_dir = Path(args.input_dir)
+    extractions_dir = Path(args.extractions_dir)
+    manifest_path = Path(args.manifest) if args.manifest else extractions_dir / "extract_manifest.json"
+
+    if not input_dir.is_dir():
+        print(f"ERROR: input directory does not exist: {input_dir}", file=sys.stderr)
+        return 1
+
+    pdfs = sorted(input_dir.rglob("*.pdf"))
+    if args.limit and args.limit > 0:
+        pdfs = pdfs[: args.limit]
+
+    manifest = _load_manifest(manifest_path)
+    papers: dict = manifest.setdefault("papers", {})
+    targets = [
+        p for p in pdfs if args.force or papers.get(p.name, {}).get("status") != "ok"
+    ]
+    print(f"Found {len(pdfs)} PDF(s), {len(targets)} pending  |  manifest: {manifest_path}\n")
+
+    extractions_dir.mkdir(parents=True, exist_ok=True)
+
+    for index, pdf_path in enumerate(targets, start=1):
+        def do_upload_and_extract(pdf_path=pdf_path):
+            with pdf_path.open("rb") as handle:
+                upload_resp = requests.post(
+                    f"{args.base_url}/v1/papers/upload",
+                    files={"file": (pdf_path.name, handle, "application/pdf")},
+                    timeout=args.timeout,
+                )
+            upload_resp.raise_for_status()
+            file_id = upload_resp.json()["data"]["file_id"]
+
+            extract_payload = {
+                "file_id": file_id,
+                "project_id": args.project_id,
+                "extract_level": args.extract_level,
+            }
+            if args.mineru_output_dir:
+                extract_payload["mineru_output_dir"] = args.mineru_output_dir
+            extract_resp = requests.post(
+                f"{args.base_url}/v1/papers/extract", json=extract_payload, timeout=args.timeout
+            )
+            extract_resp.raise_for_status()
+            body = extract_resp.json()
+            if body.get("status") != "success":
+                errors = body.get("errors") or []
+                raise RuntimeError(errors[0]["message"] if errors else "extraction failed")
+            return body["data"]["paper_extraction"]
+
+        result, error = _with_retries(
+            args.base_url, pdf_path.name, do_upload_and_extract, args.max_attempts, args.retry_delay
+        )
+        if result is not None:
+            document_id = result["document_id"]
+            (extractions_dir / f"{document_id}.json").write_text(
+                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            papers[pdf_path.name] = {
+                "status": "ok",
+                "document_id": document_id,
+                "paper_id": result.get("paper", {}).get("paper_id"),
+                "title": result.get("paper", {}).get("title"),
+            }
+            print(f"[{index}/{len(targets)}] [ok] {pdf_path.name} -> {result.get('paper', {}).get('title', '')[:70]}")
+        else:
+            papers[pdf_path.name] = {"status": "failed", "error": error}
+            print(f"[{index}/{len(targets)}] [failed] {pdf_path.name}: {error}")
+
+        _write_manifest(manifest_path, manifest)
+        if args.sleep_seconds:
+            time.sleep(args.sleep_seconds)
+
+    ok = sum(1 for p in papers.values() if p.get("status") == "ok")
+    failed = sum(1 for p in papers.values() if p.get("status") == "failed")
+    print(f"\n=== Summary ===\nOK: {ok}  Failed: {failed}  Total tracked: {len(papers)}")
+    print(f"Manifest: {manifest_path}")
+    return 0 if failed == 0 else 1
+
+
+def cmd_batch_ingest(args: argparse.Namespace) -> int:
+    """Ingest every cached paper_extraction JSON under --extractions-dir
+    (populated by batch-extract) via /v1/papers/ingest."""
+    extractions_dir = Path(args.extractions_dir)
+    manifest_path = (
+        Path(args.manifest) if args.manifest else extractions_dir / "ingest_manifest.json"
+    )
+
+    extraction_files = sorted(extractions_dir.glob("*.json"))
+    extraction_files = [
+        p for p in extraction_files if p.name not in {"extract_manifest.json", "ingest_manifest.json"}
+    ]
+    if args.limit and args.limit > 0:
+        extraction_files = extraction_files[: args.limit]
+
+    manifest = _load_manifest(manifest_path)
+    papers: dict = manifest.setdefault("papers", {})
+    targets = [
+        p for p in extraction_files if args.force or papers.get(p.stem, {}).get("status") != "ok"
+    ]
+    print(f"Found {len(extraction_files)} cached extraction(s), {len(targets)} pending  |  manifest: {manifest_path}\n")
+
+    for index, extraction_path in enumerate(targets, start=1):
+        extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
+
+        def do_ingest(extraction=extraction):
+            payload = {
+                "project_id": args.project_id,
+                "paper_extraction": extraction,
+                "confirm": True,
+            }
+            resp = requests.post(
+                f"{args.base_url}/v1/papers/ingest", json=payload, timeout=args.timeout
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            if body.get("status") != "success":
+                errors = body.get("errors") or []
+                raise RuntimeError(errors[0]["message"] if errors else "ingest failed")
+            return body["data"]
+
+        result, error = _with_retries(
+            args.base_url, extraction_path.stem, do_ingest, args.max_attempts, args.retry_delay
+        )
+        if result is not None:
+            papers[extraction_path.stem] = {"status": "ok", **result}
+            print(f"[{index}/{len(targets)}] [ok] {extraction_path.stem} -> {result}")
+        else:
+            papers[extraction_path.stem] = {"status": "failed", "error": error}
+            print(f"[{index}/{len(targets)}] [failed] {extraction_path.stem}: {error}")
+
+        _write_manifest(manifest_path, manifest)
+        if args.sleep_seconds:
+            time.sleep(args.sleep_seconds)
+
+    ok = sum(1 for p in papers.values() if p.get("status") == "ok")
+    failed = sum(1 for p in papers.values() if p.get("status") == "failed")
+    print(f"\n=== Summary ===\nOK: {ok}  Failed: {failed}  Total tracked: {len(papers)}")
+    print(f"Manifest: {manifest_path}")
+    return 0 if failed == 0 else 1
 
 
 def _print_json_response(
@@ -264,6 +437,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     match_topic.add_argument("--limit", type=int, default=None, help="Optional per-tier cap.")
     match_topic.set_defaults(func=cmd_match_topic)
+
+    batch_extract = subparsers.add_parser(
+        "batch-extract",
+        help="Upload + extract every PDF in a folder, resumable/checkpointed.",
+    )
+    batch_extract.add_argument("--input-dir", required=True, help="Folder of PDFs to scan recursively.")
+    batch_extract.add_argument(
+        "--extractions-dir",
+        required=True,
+        help="Local folder (on this machine) to cache each paper_extraction JSON in, "
+        "for batch-ingest to read back later.",
+    )
+    batch_extract.add_argument("--project-id", required=True)
+    batch_extract.add_argument("--extract-level", default="basic", choices=["basic", "detailed"])
+    batch_extract.add_argument(
+        "--mineru-output-dir", help="Optional: reuse a pre-parsed MinerU output directory."
+    )
+    batch_extract.add_argument("--manifest", help="Defaults to <extractions-dir>/extract_manifest.json")
+    batch_extract.add_argument("--limit", type=int, default=0, help="Max PDFs to process. 0 = all.")
+    batch_extract.add_argument("--force", action="store_true", help="Reprocess even if already succeeded.")
+    batch_extract.add_argument("--max-attempts", type=int, default=3)
+    batch_extract.add_argument("--retry-delay", type=float, default=10.0)
+    batch_extract.add_argument("--sleep-seconds", type=float, default=1.0)
+    batch_extract.set_defaults(func=cmd_batch_extract)
+
+    batch_ingest = subparsers.add_parser(
+        "batch-ingest",
+        help="Ingest every paper_extraction cached by batch-extract, resumable/checkpointed.",
+    )
+    batch_ingest.add_argument(
+        "--extractions-dir",
+        required=True,
+        help="Local folder populated by a prior batch-extract run.",
+    )
+    batch_ingest.add_argument("--project-id", required=True)
+    batch_ingest.add_argument("--manifest", help="Defaults to <extractions-dir>/ingest_manifest.json")
+    batch_ingest.add_argument("--limit", type=int, default=0, help="Max papers to process. 0 = all.")
+    batch_ingest.add_argument("--force", action="store_true", help="Re-ingest even if already succeeded.")
+    batch_ingest.add_argument("--max-attempts", type=int, default=3)
+    batch_ingest.add_argument("--retry-delay", type=float, default=5.0)
+    batch_ingest.add_argument("--sleep-seconds", type=float, default=0.2)
+    batch_ingest.set_defaults(func=cmd_batch_ingest)
 
     return parser
 
