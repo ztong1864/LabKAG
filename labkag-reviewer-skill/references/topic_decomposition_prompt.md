@@ -54,6 +54,23 @@ or extend a `confirmed`/`borderline` list past what actually cleared the
 corroboration bar — it only tunes strictness inputs *before* matching runs,
 never the output afterward.
 
+**If the user gives (or you can reasonably infer) a specific number** rather
+than just handful/moderate/broad, pass it as `--target-count N` on the
+`match-topic` call in addition to picking the row above. This does not
+truncate anything — `confirmed`/`borderline` are still returned in full —
+but the backend adds `summary.suggested_confirmed_count` and
+`summary.suggested_borderline_count`, a **rank-based cutoff**, not a
+hardcoded one: it finds the point in the match_score-ranked results (within
+a window around N) where the score actually drops the most, i.e. where
+papers above are genuinely more corroborated than papers below, rather than
+just stopping at the Nth item or padding weaker results in to hit N. If the
+corpus has fewer qualifying papers than N, the suggestion is simply "take
+everything" — never invented or padded. When reporting to the user, lead
+with the suggested split, but always state the tiers' true total counts too
+(e.g. "12 confirmed, all recommended; 32 borderline, the top 18 recommended
+by corroboration strength — full lists available on request") so the
+target-count framing never hides how many results actually exist.
+
 ## Rules
 
 - Every `concept.category` must be one of the taxonomy's declared category
@@ -154,11 +171,29 @@ above, then:
 
 ```text
 py -3.10 labkag-reviewer-skill/scripts/labkag_api.py match-topic \
-  --project-id <id> --plan topic_plan.json
+  --project-id <id> --plan topic_plan.json --target-count 60
 ```
+
+(`--target-count` is optional — only pass it when step 0 established a
+specific number.)
 
 The response separates `confirmed` and `borderline` papers. Never merge them
 into one list when reporting results to the user — the tier distinction is
 the whole point of the corroboration model: a `confirmed` result cleared a
 two-signal bar, a `borderline` result only cleared one and needs a human (or
 your own further judgment) before being treated as a real match.
+
+Each `MatchedPaper` also carries `match_score` (corroboration strength: 2
+points per distinct matched essential category, 1 per distinct matched
+supporting category, +1 for co-occurring evidence) and `embedding_score`
+(cosine similarity to the topic, when embeddings are enabled — a ranking
+tiebreaker only, never a tier input). Both lists are already sorted by
+`match_score` descending (embedding as tiebreaker), highest-corroborated
+first. **Use this ranking, not a hardcoded threshold, to work toward an
+expected result count**: if the user expects ~N papers and a tier has more
+than N, the top-N by rank within that tier are the strongest candidates to
+report or read first — but still report the tier's true total count and
+never silently drop the rest or claim only N papers matched. If a tier has
+fewer than N, say so plainly (the corpus doesn't support more at this
+corroboration strength) rather than dipping into the next tier to pad the
+number, or loosening `--min-essential-signals` without telling the user why.

@@ -44,6 +44,7 @@ class MatchedPaper(BaseModel):
     matched_concepts: list[dict] = Field(default_factory=list)
     co_occurrence: bool = False
     embedding_score: float | None = None
+    match_score: float = 0.0
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -53,3 +54,4 @@ class MatchTopicRequest(BaseModel):
     min_essential_signals: int = Field(default=2, ge=1)
     include_borderline: bool = True
     limit: int | None = None
+    target_count: int | None = Field(default=None, ge=1)

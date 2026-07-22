@@ -2,7 +2,13 @@ import pytest
 
 from app.adapters.neo4j_query_store import PaperEntityRow
 from app.schemas.taxonomy import ProjectTaxonomy, TaxonomyCategory, TopicConcept, TopicPlan
-from app.services.topic_matcher import TopicPlanError, match_topic, score_paper, verify_plan
+from app.services.topic_matcher import (
+    TopicPlanError,
+    _suggest_cutoff,
+    match_topic,
+    score_paper,
+    verify_plan,
+)
 
 CONCEPTS = [
     TopicConcept(category="catalyst_type", value="iron", essential=True),
@@ -279,6 +285,35 @@ def test_match_topic_summary_counts_excluded_papers():
     }
 
 
+def test_match_topic_ranks_confirmed_by_match_score_not_insertion_order():
+    weak_row = _confirmed_row("weak")  # 2 essential categories only, no supporting concept
+    strong_row = PaperEntityRow(
+        paper_id="strong",
+        paper_properties={"title": "strong"},
+        entities=[
+            _entity("m_strong", "Material", {"tag_catalyst_type": "iron"}),
+            _entity("c_strong", "Condition", {"tag_reaction_type": "oxidation"}),
+            _entity("s_strong", "Material", {"tag_substrate_class": "alcohol"}),
+        ],
+    )
+    # Inserted weak-then-strong so a pass-through order would keep "weak" first.
+    rows = [weak_row, strong_row]
+    plan = TopicPlan(topic="iron oxidation", project_id="proj_1", concepts=_MULTI_TIER_CONCEPTS)
+
+    result = match_topic(
+        "proj_1",
+        plan,
+        min_essential_signals=2,
+        include_borderline=True,
+        limit=None,
+        query_store=FakeQueryStore(rows),
+        embedding_client=None,
+    )
+
+    assert [paper.paper_id for paper in result["confirmed"]] == ["strong", "weak"]
+    assert result["confirmed"][0].match_score > result["confirmed"][1].match_score
+
+
 def test_match_topic_excludes_paper_outside_declared_year_range():
     rows = [
         _confirmed_row("in_range"),
@@ -348,6 +383,101 @@ def test_match_topic_applies_no_year_filter_when_plan_leaves_it_unset():
     )
 
     assert [paper.paper_id for paper in result["confirmed"]] == ["no_year"]
+
+
+# ---- _suggest_cutoff ----
+
+
+def test_suggest_cutoff_returns_all_when_fewer_than_target():
+    scores = [5.0, 4.0, 3.0]
+    assert _suggest_cutoff(scores, target=10) == 3
+
+
+def test_suggest_cutoff_finds_steepest_drop_near_target():
+    # Steady plateau at 3.0 through index 10, a real elbow down to 1.0 at
+    # index 10-11, then another plateau at 1.0. The cutoff should land on
+    # the elbow (10), not at the target (8) or the far window edge.
+    scores = [3.0] * 10 + [1.0] * 10
+    assert _suggest_cutoff(scores, target=8) == 10
+
+
+def test_suggest_cutoff_defaults_to_target_when_scores_are_flat():
+    scores = [2.0] * 20
+    assert _suggest_cutoff(scores, target=8) == 8
+
+
+def test_suggest_cutoff_never_exceeds_available_scores():
+    scores = [3.0, 3.0, 3.0]
+    assert _suggest_cutoff(scores, target=3) == 3
+    assert _suggest_cutoff(scores, target=0) == 3
+
+
+# ---- match_topic: target_count wiring ----
+
+
+def _mid_borderline_row(paper_id: str) -> PaperEntityRow:
+    """One essential match on a non-central entity (so it stays borderline,
+    per the corroboration rule) plus one supporting match -- scores higher
+    than a pure-supporting-only borderline row, giving a graduated
+    distribution instead of a flat one."""
+    return PaperEntityRow(
+        paper_id=paper_id,
+        paper_properties={"title": paper_id},
+        entities=[
+            _entity(f"e_{paper_id}", "Material", {"tag_catalyst_type": "iron"}),
+            _entity(f"s_{paper_id}", "Material", {"tag_substrate_class": "alcohol"}),
+        ],
+    )
+
+
+def test_match_topic_reports_suggested_counts_split_across_tiers():
+    # 2 confirmed (score 4.0 each), 3 "mid" borderline (score 3.0 each), 2
+    # "low" borderline (score 1.0 each) -- a real elbow sits between the mid
+    # and low borderline groups. Target=5 should land the cutoff right at
+    # that elbow: both confirmed plus all 3 mid-borderline, not the 2 low
+    # ones, even though 2+3=5 already matches target exactly.
+    rows = (
+        [_confirmed_row(f"confirmed_{i}") for i in range(2)]
+        + [_mid_borderline_row(f"mid_{i}") for i in range(3)]
+        + [_borderline_row(f"low_{i}") for i in range(2)]
+    )
+    plan = TopicPlan(topic="iron oxidation", project_id="proj_1", concepts=_MULTI_TIER_CONCEPTS)
+
+    result = match_topic(
+        "proj_1",
+        plan,
+        min_essential_signals=2,
+        include_borderline=True,
+        limit=None,
+        query_store=FakeQueryStore(rows),
+        embedding_client=None,
+        target_count=5,
+    )
+
+    assert result["summary"]["target_count"] == 5
+    assert result["summary"]["suggested_confirmed_count"] == 2
+    assert result["summary"]["suggested_borderline_count"] == 3
+    # Advisory only -- full lists are still returned, nothing truncated.
+    assert len(result["confirmed"]) == 2
+    assert len(result["borderline"]) == 5
+
+
+def test_match_topic_omits_suggested_counts_when_target_not_given():
+    rows = [_confirmed_row("confirmed_0")]
+    plan = TopicPlan(topic="iron oxidation", project_id="proj_1", concepts=_MULTI_TIER_CONCEPTS)
+
+    result = match_topic(
+        "proj_1",
+        plan,
+        min_essential_signals=2,
+        include_borderline=True,
+        limit=None,
+        query_store=FakeQueryStore(rows),
+        embedding_client=None,
+    )
+
+    assert "target_count" not in result["summary"]
+    assert "suggested_confirmed_count" not in result["summary"]
 
 
 # ---- verify_plan ----

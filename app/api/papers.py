@@ -62,6 +62,7 @@ def match_topic_route(request: MatchTopicRequest):
             request.limit,
             query_store,
             embedding_client,
+            target_count=request.target_count,
         )
     except RuntimeError as exc:
         raise error_response(502, ErrorCode.GRAPH_QUERY_FAILED, str(exc)) from exc

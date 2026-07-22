@@ -239,6 +239,13 @@ def score_paper(
         tier = "borderline"
         reasons.append("Only supporting (non-essential) concepts matched.")
 
+    supporting_categories = {match["category"] for match in matches if not match["essential"]}
+    match_score = (
+        2.0 * len(essential_categories)
+        + 1.0 * len(supporting_categories)
+        + (1.0 if co_occurrence else 0.0)
+    )
+
     return MatchedPaper(
         paper_id=paper_row.paper_id,
         title=paper_row.paper_properties.get("title", ""),
@@ -250,8 +257,39 @@ def score_paper(
         ],
         co_occurrence=co_occurrence,
         embedding_score=None,
+        match_score=match_score,
         reasons=reasons,
     )
+
+
+def _suggest_cutoff(scores: list[float], target: int) -> int:
+    """Given `scores` sorted descending, return a cutoff count near `target`
+    that falls at the steepest score drop within a neighborhood of `target`,
+    rather than at `target` itself or at the single largest gap wherever it
+    happens to be in the whole list. This is what makes the cutoff
+    "reasonable": it lands where papers above are genuinely more
+    corroborated than papers below, while still tracking the caller's
+    expected size. Never invents or drops data -- if there are fewer than
+    `target` candidates, returns all of them (no padding)."""
+    n = len(scores)
+    if target <= 0 or n <= target:
+        return n
+    window = max(3, target // 4)
+    lo = max(1, target - window)
+    hi = min(n - 1, target + window)
+    # Evaluate candidates closest-to-target first so a tie in gap size
+    # (e.g. a flat score distribution with no real elbow) resolves to the
+    # target itself rather than drifting to whichever window edge happens
+    # to be scanned first.
+    candidates = sorted(range(lo, hi + 1), key=lambda index: abs(index - target))
+    best_index = target
+    best_gap = -1.0
+    for index in candidates:
+        gap = scores[index - 1] - scores[index]
+        if gap > best_gap:
+            best_gap = gap
+            best_index = index
+    return best_index
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -273,6 +311,7 @@ def match_topic(
     limit: int | None,
     query_store: Any,
     embedding_client: Any | None,
+    target_count: int | None = None,
 ) -> dict[str, Any]:
     rows = query_store.fetch_entities_for_topic_matching(project_id)
 
@@ -299,20 +338,52 @@ def match_topic(
             paper_vector = row.paper_properties.get("paper_embedding") if row else None
             if paper_vector:
                 matched.embedding_score = _cosine_similarity(topic_embedding, paper_vector)
-        confirmed.sort(key=lambda m: m.embedding_score or 0, reverse=True)
-        borderline.sort(key=lambda m: m.embedding_score or 0, reverse=True)
+
+    # Rank within each tier by corroboration strength (match_score), never by
+    # embedding alone -- embedding only breaks ties between equally-corroborated
+    # papers. This gives callers a principled way to pick "the top N" from a
+    # tier without the backend hardcoding any target count or score cutoff.
+    confirmed.sort(key=lambda m: (m.match_score, m.embedding_score or 0), reverse=True)
+    borderline.sort(key=lambda m: (m.match_score, m.embedding_score or 0), reverse=True)
+
+    suggested_confirmed_count: int | None = None
+    suggested_borderline_count: int | None = None
+    if target_count is not None:
+        # Computed on the full, pre-limit candidate pool -- the suggestion
+        # should reflect all qualifying papers, not an arbitrary `limit` cap.
+        # A confirmed result always outranks a borderline one regardless of
+        # raw score (tier is the correctness gate, match_score only orders
+        # within it), so the combined sequence for cutoff purposes is every
+        # confirmed score followed by every borderline score, each already
+        # sorted descending.
+        combined_scores = [m.match_score for m in confirmed] + [m.match_score for m in borderline]
+        cutoff = _suggest_cutoff(combined_scores, target_count)
+        suggested_confirmed_count = min(cutoff, len(confirmed))
+        suggested_borderline_count = max(0, cutoff - len(confirmed))
 
     if limit is not None:
         confirmed = confirmed[:limit]
         borderline = borderline[:limit]
+        # A `limit` cap can make an already-computed suggestion reference
+        # more papers than are actually being returned; clamp so the
+        # summary never describes data that isn't in the response.
+        if suggested_confirmed_count is not None:
+            suggested_confirmed_count = min(suggested_confirmed_count, len(confirmed))
+            suggested_borderline_count = min(suggested_borderline_count, len(borderline))
+
+    summary: dict[str, Any] = {
+        "candidates_scanned": len(rows),
+        "confirmed_count": len(confirmed),
+        "borderline_count": len(borderline) if include_borderline else 0,
+        "excluded_count": excluded_count,
+    }
+    if target_count is not None:
+        summary["target_count"] = target_count
+        summary["suggested_confirmed_count"] = suggested_confirmed_count
+        summary["suggested_borderline_count"] = suggested_borderline_count
 
     return {
         "confirmed": confirmed,
         "borderline": borderline if include_borderline else [],
-        "summary": {
-            "candidates_scanned": len(rows),
-            "confirmed_count": len(confirmed),
-            "borderline_count": len(borderline) if include_borderline else 0,
-            "excluded_count": excluded_count,
-        },
+        "summary": summary,
     }

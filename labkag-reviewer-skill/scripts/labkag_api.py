@@ -116,6 +116,8 @@ def cmd_match_topic(args: argparse.Namespace) -> int:
     }
     if args.limit is not None:
         payload["limit"] = args.limit
+    if args.target_count is not None:
+        payload["target_count"] = args.target_count
     url = f"{args.base_url}/v1/papers/match-topic"
     return _print_json_response("POST", url, json_payload=payload, timeout=args.timeout)
 
@@ -442,6 +444,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exclude the borderline tier from the response, confirmed matches only.",
     )
     match_topic.add_argument("--limit", type=int, default=None, help="Optional per-tier cap.")
+    match_topic.add_argument(
+        "--target-count",
+        type=int,
+        default=None,
+        help=(
+            "Expected result size. Never truncates confirmed/borderline (still "
+            "returned in full) -- adds summary.suggested_confirmed_count/"
+            "suggested_borderline_count, a cutoff found at the steepest "
+            "match_score drop near this target, not just at the Nth item."
+        ),
+    )
     match_topic.set_defaults(func=cmd_match_topic)
 
     batch_extract = subparsers.add_parser(

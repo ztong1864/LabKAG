@@ -110,14 +110,26 @@ Workflow to find papers matching a topic:
    step 0 has you ask the same handful/moderate/broad question again, but
    scoped to *this specific topic* — it tunes `essential` marking and the
    `--min-essential-signals`/`--no-borderline`/`--limit` flags for the
-   match-topic call in step 3, never the actual match results.
-3. `match-topic --project-id <id> --plan topic_plan.json`.
+   match-topic call in step 3, never the actual match results. If the user
+   gave a specific number (not just handful/moderate/broad), also pass it as
+   `--target-count N`.
+3. `match-topic --project-id <id> --plan topic_plan.json [--target-count N]`.
+   `--target-count` never truncates or pads — `confirmed`/`borderline` are
+   always returned in full — it adds `summary.suggested_confirmed_count`/
+   `suggested_borderline_count`, a rank-based cutoff (by `match_score`,
+   corroboration strength) found at the steepest score drop near N, not
+   just at the Nth item. Every `MatchedPaper` also carries `match_score` and
+   `embedding_score`; both tiers are pre-sorted by `match_score` descending
+   (embedding only breaks ties), so you can always work toward a target size
+   from the ranking instead of guessing a threshold.
 4. Report `confirmed` and `borderline` results separately — never merge
    them. A `confirmed` result cleared a two-signal corroboration bar; a
    `borderline` result cleared only one and needs further judgment before
    being treated as a real match. Never pad a small `confirmed` set with
    `borderline` results to hit a target count — say how many were found and
-   why, instead. Relay each result's `reasons` entries to the user
+   why, instead (use the suggested-cutoff numbers from step 3 if you have
+   them, but always state each tier's true total too). Relay each result's
+   `reasons` entries to the user
    **verbatim** rather than re-deriving your own explanation — the backend
    already produces a human-readable reason per match (e.g. citing shared
    evidence for a co-occurrence hit), and re-paraphrasing risks
