@@ -201,6 +201,49 @@ violates them is rejected rather than silently corrected.
   so. Never pass `--confirm` reflexively on every call — it should follow a
   deliberate read of `affected_papers_count`.
 
+### Interop with review-writer's discovery format
+
+If a downstream `review-writer` pipeline stage expects
+`review-projects/<project_id>/00_discovery/*` in the shape produced by its
+own `review-topic-paper-discovery` skill (e.g. `review-literature-matrix-outline`,
+which reads `selected_discovery_results.json` + `topic_input.md` and opens
+`review-library/metadata/papers/<paper_id>.metadata.json` per candidate),
+export a saved `match-topic` response into that exact format instead of
+hand-writing it:
+
+```text
+py -3.10 labkag-reviewer-skill/scripts/export_discovery_format.py \
+  --match-result <saved match-topic response.json> \
+  --review-root <review-writer-style root, has review-library/> \
+  --discovery-project-id <project-id under review-projects/> \
+  --group-by catalyst_or_method
+```
+
+This writes all 9 files `review-topic-paper-discovery` produces
+(`topic_input.md`, `query_plan.draft.json`, `keyword_set.draft.json`,
+`local_results_by_keyword.json`, `web_results_by_keyword.json`,
+`combined_results_by_keyword.json`, `selected_discovery_results.json`,
+`discovery_report.md`, `human_check_state.json`), so any consumer built
+against that format runs unmodified regardless of which tool produced the
+candidates.
+
+Read `export_discovery_format.py`'s module docstring before trusting the
+output blindly — it documents the real limitations, not just the happy path:
+- **Paper-ID join is by normalized title**, since `MatchedPaper` carries no
+  DOI. Any paper whose title can't be matched (exact-normalized or
+  token-overlap ≥0.6) to a `review-library/registry/papers.jsonl` entry is
+  **excluded from the output and printed**, never guessed. Check the printed
+  unresolved list every run.
+- **`best_score` is a rescaled approximation** (`match_score / 4.0`, clamped
+  to 1), not the same metric as the discovery tool's own keyword-overlap
+  score — fine for sorting/display, not for literal comparison.
+- **`filter_stats`'s year-exclusion counts are not separable** from LabKAG's
+  combined `excluded_count`, so they're left at 0 rather than fabricated.
+- The taxonomy-category → structured-tag-category mapping
+  (`DEFAULT_CATEGORY_MAP`) is a small, editable dict; categories with no
+  natural match fall back to `reaction_type`, mirroring
+  `keyword_expansion_prompt.md`'s own stated fallback rule.
+
 ## Output Handling
 
 - Print or return the raw JSON response when possible.
