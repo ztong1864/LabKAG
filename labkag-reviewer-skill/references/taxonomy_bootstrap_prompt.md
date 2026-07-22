@@ -13,24 +13,42 @@ for it.
 ## Process
 
 1. List the project's papers: `papers-list --project-id <id>`.
-2. Read a representative sample (10-20 papers is usually enough; more for a
+2. Ask the user (or infer from how they described the project) what a
+   *typical* topic query against this project should return: a **handful**
+   of tightly-specific papers, a **moderate**, review-slice-sized set, or
+   **broad** recall across a whole sub-field. This shapes how granular the
+   taxonomy needs to be — it is a one-time input to bootstrap, not something
+   re-asked per topic (that happens separately in
+   `topic_decomposition_prompt.md`, per query):
+   - **Handful** → lean toward more categories (top of the 3-6 range) with
+     narrower, more specific `allowed_values`, so two matched categories
+     narrow the corpus sharply.
+     - **Moderate** → the default: 3-6 categories sized to what's actually in
+     the corpus (see step 4), values specific enough to be useful but broad
+     enough to recur.
+   - **Broad** → lean toward fewer categories (bottom of the 3-6 range) with
+     coarser `allowed_values` (merge near-duplicate observed values into one
+     canonical value + aliases more aggressively), so a paper only needs to
+     agree on a couple of broad axes to corroborate.
+   If the user gives no signal, default to "moderate."
+3. Read a representative sample (10-20 papers is usually enough; more for a
    project spanning several sub-domains) via
    `knowledge --paper-id <id> --project-id <id>`. Look at the free-text
    `methods`, `materials`, `conditions`, `metrics`, `results`, and
    `conclusions` fields already extracted for each paper.
-3. Infer 3-6 categories that would actually distinguish these papers from
-   each other for retrieval purposes — not generic bibliographic fields
+4. Infer categories that would actually distinguish these papers from each
+   other for retrieval purposes — not generic bibliographic fields
    (title/journal/year already exist separately), but the domain-specific
-   axes a researcher would search by. For a chemistry corpus this is
-   typically something like catalyst/reagent class, substrate class, and
-   reaction type; for a different domain the axes will be different. Do not
-   copy a fixed category list from another project — derive it from what is
-   actually in these papers.
-4. For each category, enumerate the allowed values that actually appear
+   axes a researcher would search by, sized per step 2 above. For a
+   chemistry corpus this is typically something like catalyst/reagent class,
+   substrate class, and reaction type; for a different domain the axes will
+   be different. Do not copy a fixed category list from another project —
+   derive it from what is actually in these papers.
+5. For each category, enumerate the allowed values that actually appear
    across the sampled papers (plus close variants worth merging as aliases,
    e.g. "Fe(NO3)3", "iron nitrate", "ferric nitrate" as aliases of one
    canonical value "iron"). Do not invent values that were not observed.
-5. Write the taxonomy to a local JSON file and submit it:
+6. Write the taxonomy to a local JSON file and submit it:
 
 ```text
 py -3.10 labkag-reviewer-skill/scripts/labkag_api.py taxonomy-set \

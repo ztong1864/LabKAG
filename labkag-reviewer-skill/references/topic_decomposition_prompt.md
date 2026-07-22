@@ -10,6 +10,28 @@ Given a free-text topic and a project's current taxonomy (fetch it first with
 `TopicPlan` and save it to a local JSON file. That file is the
 agent-to-backend boundary, passed to `match-topic --plan <path>`.
 
+## Step 0: ask the expected result size
+
+Before decomposing the topic, ask the user (or infer from how they phrased
+the request, e.g. "just the key papers on X" vs. "everything on X") roughly
+how many papers they expect this topic to surface: a **handful** (a few,
+highly specific), a **moderate set** (a typical literature-review slice), or
+**broad** (cast a wide net). This number is not enforced as a hard cap — the
+backend never pads results to hit a target count — but it calibrates how
+strict the plan and the match-topic call should be:
+
+| Expected size | `essential` marking | `--min-essential-signals` | `--no-borderline` | `--limit` |
+|---|---|---|---|---|
+| Handful (a few) | Mark more concepts essential; prefer the most specific applicable value | 2 (or higher if the taxonomy has 3+ relevant categories) | pass it (borderline off) | small, e.g. 10-20 |
+| Moderate | Default marking per the rules below | 2 | omit (borderline included, reported separately) | omit or a moderate cap |
+| Broad | Mark fewer concepts essential; keep only the concepts that are truly non-negotiable | 1-2 | omit | omit |
+
+If the user gives no signal at all, default to "moderate" rather than
+guessing broad or narrow. Never use the expected count to fabricate matches
+or extend a `confirmed`/`borderline` list past what actually cleared the
+corroboration bar — it only tunes strictness inputs *before* matching runs,
+never the output afterward.
+
 ## Rules
 
 - Every `concept.category` must be one of the taxonomy's declared category

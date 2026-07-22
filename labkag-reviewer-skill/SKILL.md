@@ -95,9 +95,17 @@ Workflow to find papers matching a topic:
 1. `taxonomy-get --project-id <id>`. If it returns nothing and the project
    already has extracted papers, follow
    `references/taxonomy_bootstrap_prompt.md` to propose one, then
-   `taxonomy-set` it.
+   `taxonomy-set` it. That doc's step 0 has you ask the user roughly how
+   many papers a *typical* query against this project should return
+   (handful / moderate / broad) — this is a one-time input that sizes the
+   taxonomy's category count and value granularity, not something re-asked
+   per topic.
 2. Follow `references/topic_decomposition_prompt.md` to turn the topic into
-   a `topic_plan.json` file, using the taxonomy from step 1.
+   a `topic_plan.json` file, using the taxonomy from step 1. That doc's
+   step 0 has you ask the same handful/moderate/broad question again, but
+   scoped to *this specific topic* — it tunes `essential` marking and the
+   `--min-essential-signals`/`--no-borderline`/`--limit` flags for the
+   match-topic call in step 3, never the actual match results.
 3. `match-topic --project-id <id> --plan topic_plan.json`.
 4. Report `confirmed` and `borderline` results separately — never merge
    them. A `confirmed` result cleared a two-signal corroboration bar; a
