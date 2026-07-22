@@ -139,6 +139,44 @@ Workflow to find papers matching a topic:
    — do not treat it as a bug to work around by loosening
    `--min-essential-signals` without telling the user why.
 
+### When results fall short of the target
+
+If `--target-count N` was given and `confirmed_count + borderline_count < N`
+(the backend's cutoff suggestion will be "take everything" —
+`suggested_confirmed_count == confirmed_count` and
+`suggested_borderline_count == borderline_count`), that is a genuine
+shortfall, not a bug, and not something to silently work around. Report the
+gap plainly (actual vs. target) and let the **user** choose how to proceed —
+each option below trades something real, so it is their call, not yours to
+make on their behalf:
+
+1. **Accept the actual count.** The corpus doesn't support more papers at
+   this corroboration strength — this is a correct, complete answer, not a
+   partial one.
+2. **Loosen the match.** Lower `--min-essential-signals`, or move a concept
+   from `essential` to supporting in the plan. Trades precision for recall —
+   more papers qualify, but some will be weaker matches. Say explicitly
+   which knob you'd change and what you'd expect it to do before doing it.
+3. **Broaden the topic itself.** Drop a narrowing concept from the plan
+   (e.g. a specific substrate class) so the *topic* covers more ground. This
+   changes what's actually being searched for, not just how strictly it's
+   matched — confirm the reworded topic with the user in their own words
+   before resubmitting, don't just silently widen the plan.
+4. **Check tagging quality before concluding the corpus lacks papers.** A
+   shortfall can also mean relevant entities exist but weren't tagged
+   (e.g. titles are obviously on-topic but the taxonomy tag never landed on
+   any of their entities). If several `excluded` or thin-`borderline`
+   papers look like they should plausibly match on a skim of their titles,
+   consider a `backfill_taxonomy_tags.py --force` retag pass or refining the
+   taxonomy's `aliases` for the relevant category before treating the
+   shortfall as a real corpus limit.
+5. **Expand the corpus.** Out of scope for a single topic query, but worth
+   naming if it's plausibly the actual cause (e.g. the corpus predates the
+   topic's year range, or the relevant papers were never ingested).
+
+Never pick one of these unilaterally to hit the number — present the
+shortfall and the options, then act on what the user actually chooses.
+
 These two reference docs are the LLM-to-backend contract boundary. Do not
 skip their verification rules (never invent a taxonomy category/value that
 doesn't exist, never submit a plan with zero essential concepts, compute the
