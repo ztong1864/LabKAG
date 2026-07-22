@@ -3,9 +3,11 @@ from fastapi import HTTPException
 from app.adapters.embedding_client import configured_embedding_client
 from app.adapters.graph_client import GraphWriteError, graph_client
 from app.adapters.graph_mapper import map_extraction_to_graph
+from app.adapters.query_store_factory import build_query_store
 from app.config import settings
 from app.schemas.common import SkillMetadata
 from app.schemas.errors import ErrorCode, SkillError
+from app.schemas.extraction import PaperMetadata
 from app.schemas.paper import ExtractPaperRequest, IngestPaperRequest
 from app.schemas.response import SkillResponse, SkillStatus
 from app.schemas.taxonomy import ProjectTaxonomy
@@ -122,6 +124,34 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
     )
 
 
+def _find_existing_paper_id(query_store, project_id: str, paper: PaperMetadata) -> str | None:
+    """Best-effort duplicate check: does a paper with the same DOI (preferred)
+    or the same title already exist in this project? If so, return its id so
+    the caller can reuse it -- write_graph's MERGE-by-id then updates the
+    existing node instead of creating a duplicate paper for a PDF that was
+    extracted more than once. Never raises; a failure here should never
+    block ingest, it just means dedup didn't happen for this call."""
+    doi = (paper.doi or "").strip().lower()
+    title = (paper.title or "").strip().lower()
+    if not doi and not title:
+        return None
+
+    try:
+        existing_papers = query_store.list_papers(project_id)
+    except Exception:
+        return None
+
+    if doi:
+        for existing in existing_papers:
+            if str(existing.get("doi") or "").strip().lower() == doi:
+                return existing.get("id")
+    if title:
+        for existing in existing_papers:
+            if str(existing.get("title") or "").strip().lower() == title:
+                return existing.get("id")
+    return None
+
+
 def ingest_paper(request: IngestPaperRequest) -> SkillResponse:
     if settings.enable_embedding:
         embedding_client = configured_embedding_client()
@@ -141,6 +171,18 @@ def ingest_paper(request: IngestPaperRequest) -> SkillResponse:
             embedding_client,
             model=settings.embedding_model,
         )
+    if request.project_id and request.confirm:
+        try:
+            query_store = build_query_store()
+        except Exception:
+            query_store = None
+        if query_store is not None:
+            existing_id = _find_existing_paper_id(
+                query_store, request.project_id, request.paper_extraction.paper
+            )
+            if existing_id and existing_id != request.paper_extraction.paper.paper_id:
+                request.paper_extraction.paper.paper_id = existing_id
+
     graph_payload = map_extraction_to_graph(request.paper_extraction)
     try:
         result = graph_client.write_graph(
