@@ -46,6 +46,36 @@ def _resolve_value(
     return None
 
 
+def _paper_year(paper_properties: dict[str, Any]) -> int | None:
+    raw = paper_properties.get("year")
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _paper_in_year_range(
+    paper_properties: dict[str, Any], year_from: int | None, year_to: int | None
+) -> bool:
+    """True if the paper's year satisfies the plan's declared range. A paper
+    with a missing/unparseable year is excluded whenever a range is declared
+    -- we cannot claim a paper matches "between 2024 and 2025" when its year
+    isn't actually known, so silence is treated as a non-match rather than
+    a pass-through."""
+    if year_from is None and year_to is None:
+        return True
+    year = _paper_year(paper_properties)
+    if year is None:
+        return False
+    if year_from is not None and year < year_from:
+        return False
+    if year_to is not None and year > year_to:
+        return False
+    return True
+
+
 def _derive_year_filter(topic: str, current_year: int) -> tuple[int | None, int | None]:
     match = _RELATIVE_YEAR_RE.search(topic)
     if not match:
@@ -212,6 +242,7 @@ def score_paper(
     return MatchedPaper(
         paper_id=paper_row.paper_id,
         title=paper_row.paper_properties.get("title", ""),
+        year=_paper_year(paper_row.paper_properties),
         tier=tier,
         matched_concepts=[
             {key: value for key, value in match.items() if key != "evidence_ids"}
@@ -249,6 +280,9 @@ def match_topic(
     borderline: list[MatchedPaper] = []
     excluded_count = 0
     for row in rows:
+        if not _paper_in_year_range(row.paper_properties, plan.year_from, plan.year_to):
+            excluded_count += 1
+            continue
         matched = score_paper(plan.concepts, row, min_essential_signals)
         if matched is None:
             excluded_count += 1

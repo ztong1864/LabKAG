@@ -95,11 +95,16 @@ Workflow to find papers matching a topic:
 1. `taxonomy-get --project-id <id>`. If it returns nothing and the project
    already has extracted papers, follow
    `references/taxonomy_bootstrap_prompt.md` to propose one, then
-   `taxonomy-set` it. That doc's step 0 has you ask the user roughly how
+   `taxonomy-set` it. That doc's step 2 has you ask the user roughly how
    many papers a *typical* query against this project should return
    (handful / moderate / broad) — this is a one-time input that sizes the
    taxonomy's category count and value granularity, not something re-asked
-   per topic.
+   per topic. After reading a first ~10-paper sample, step 4 has you check
+   in with the user once more before finalizing categories — propose your
+   candidate classification axes (catalyst? reaction type? substrate?
+   application?) and surface any term the sample left ambiguous, so the
+   taxonomy ends up organized around the axis the user actually wants to
+   search by, not just whatever framing you inferred alone.
 2. Follow `references/topic_decomposition_prompt.md` to turn the topic into
    a `topic_plan.json` file, using the taxonomy from step 1. That doc's
    step 0 has you ask the same handful/moderate/broad question again, but

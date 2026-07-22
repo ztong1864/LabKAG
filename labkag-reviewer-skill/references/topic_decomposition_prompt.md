@@ -10,15 +10,37 @@ Given a free-text topic and a project's current taxonomy (fetch it first with
 `TopicPlan` and save it to a local JSON file. That file is the
 agent-to-backend boundary, passed to `match-topic --plan <path>`.
 
-## Step 0: ask the expected result size
+## Step 0: one upfront check — ambiguity and expected size together
 
-Before decomposing the topic, ask the user (or infer from how they phrased
-the request, e.g. "just the key papers on X" vs. "everything on X") roughly
-how many papers they expect this topic to surface: a **handful** (a few,
-highly specific), a **moderate set** (a typical literature-review slice), or
-**broad** (cast a wide net). This number is not enforced as a hard cap — the
-backend never pads results to hit a target count — but it calibrates how
-strict the plan and the match-topic call should be:
+Before decomposing the topic, do a first pass over it for two things at
+once, and if either needs the user's input, ask **both in the same
+question** rather than interrupting twice:
+
+1. **Ambiguity scan.** Does the topic contain an abbreviation or term with
+   more than one plausible meaning in the relevant domain (not just
+   theoretically possible elsewhere — plausible *here*)? Check corpus
+   evidence first (taxonomy `allowed_values`/`aliases`, and the sampled
+   papers' extracted text) per the disambiguation rule below. Only surface
+   this to the user if corpus evidence is genuinely inconclusive between two
+   or more domain-plausible readings — do not ask about a term that's
+   unambiguous or already corpus-grounded, and do not skip the corpus check
+   and go straight to asking.
+2. **Expected result size.** Infer from how the user phrased the request
+   (e.g. "just the key papers on X" vs. "everything on X"); only ask if
+   there's no signal either way. Roughly: a **handful** (a few, highly
+   specific), a **moderate set** (a typical literature-review slice), or
+   **broad** (cast a wide net).
+
+If step 1 needs the user (ambiguous term) and step 2 has no signal either,
+combine them into one question — e.g. "By APA did you mean X or Y, and
+roughly how many papers are you expecting — a handful, or a broader set?" —
+rather than asking twice. If only one of the two needs input, ask only that
+one. If neither does, proceed straight to decomposition without asking
+anything.
+
+The expected size is not enforced as a hard cap — the backend never pads
+results to hit a target count — but it calibrates how strict the plan and
+the match-topic call should be:
 
 | Expected size | `essential` marking | `--min-essential-signals` | `--no-borderline` | `--limit` |
 |---|---|---|---|---|
@@ -59,6 +81,28 @@ never the output afterward.
   `reason` instead. A plan may still proceed if other concepts give it a
   meaningful search. A plan with no essential concepts at all must not be
   submitted — stop and ask the user to clarify the topic first.
+- **Disambiguating an abbreviation or term with more than one plausible
+  meaning, even within the relevant domain**: never resolve it from general
+  world knowledge (a web search, your own training data) as the sole basis
+  for an essential concept — that resolution has no connection to what this
+  *specific* corpus's authors actually mean by it, and a wrong guess here
+  silently mis-scopes the whole plan. Resolve in this order:
+  1. **Corpus evidence first.** Check whether the taxonomy's `allowed_values`
+     already suggest a specific expansion (e.g. a value or its `aliases`
+     spelling out the abbreviation), or search the sampled papers'
+     extracted text for the abbreviation or its candidate expansions being
+     used directly. Corpus evidence beats any outside source, because it
+     reflects this project's actual terminology.
+  2. **If the corpus is inconclusive** and more than one meaning is
+     plausible within the domain, do not silently pick one — even a
+     well-cited, seemingly-authoritative outside source is still a guess
+     about *this* corpus's intent. List the candidate meanings you found
+     (with your confidence in each) and ask the user which one they mean,
+     before building any concept from it. Only proceed without asking if
+     exactly one meaning is plausible and corpus-grounded.
+  3. Record the resolution (which meaning, and why) in the concept's
+     `reason` field so the choice is auditable later, not just implicit in
+     the resulting `value`.
 - Prefer more specific, narrower matches to more general ones when the
   taxonomy offers both (e.g. a specific allowed value over a broad
   catch-all), since specificity is what makes the backend's corroboration

@@ -31,24 +31,46 @@ for it.
      canonical value + aliases more aggressively), so a paper only needs to
      agree on a couple of broad axes to corroborate.
    If the user gives no signal, default to "moderate."
-3. Read a representative sample (10-20 papers is usually enough; more for a
-   project spanning several sub-domains) via
-   `knowledge --paper-id <id> --project-id <id>`. Look at the free-text
-   `methods`, `materials`, `conditions`, `metrics`, `results`, and
-   `conclusions` fields already extracted for each paper.
-4. Infer categories that would actually distinguish these papers from each
+3. Read a first sample of about 10 papers via
+   `knowledge --paper-id <id> --project-id <id>`, spread across whatever
+   sub-clusters are visible from the `papers-list` titles/years so the first
+   read isn't accidentally narrow. Look at the free-text `methods`,
+   `materials`, `conditions`, `metrics`, `results`, and `conclusions` fields
+   already extracted for each paper.
+4. **Before finalizing any categories, check in with the user once.** From
+   this first ~10-paper read, you will already have (a) a rough sense of
+   candidate classification axes (e.g. "I could organize this by
+   catalyst/reagent, by reaction type, by substrate, or by application — which
+   matters most for how you'll search this project?") and (b) any
+   abbreviations or domain terms that came up ambiguous even after reading
+   the sample (same bar as `topic_decomposition_prompt.md`'s disambiguation
+   rule — only surface a term here if the sample genuinely didn't settle it,
+   not every technical term). Ask both together as one question if there's
+   anything to ask: propose your candidate axes and let the user redirect or
+   confirm them, and list any unresolved terms for them to clarify. If the
+   sample already makes the axes obvious and nothing came up ambiguous,
+   state your proposed categories for confirmation rather than asking an
+   open-ended question — a concrete proposal is easier to correct than a
+   blank one. Skipping this check risks a taxonomy that fits your own
+   framing of the papers but not the axis the user actually wants to search
+   by, which only surfaces later as bad corroboration on real queries.
+5. Read the rest of the representative sample (10-20 papers total is usually
+   enough; more for a project spanning several sub-domains) with the
+   confirmed direction in mind.
+6. Infer categories that would actually distinguish these papers from each
    other for retrieval purposes — not generic bibliographic fields
    (title/journal/year already exist separately), but the domain-specific
-   axes a researcher would search by, sized per step 2 above. For a
-   chemistry corpus this is typically something like catalyst/reagent class,
-   substrate class, and reaction type; for a different domain the axes will
-   be different. Do not copy a fixed category list from another project —
-   derive it from what is actually in these papers.
-5. For each category, enumerate the allowed values that actually appear
+   axes a researcher would search by, sized per step 2 above and directed by
+   step 4. For a chemistry corpus this is typically something like
+   catalyst/reagent class, substrate class, and reaction type; for a
+   different domain the axes will be different. Do not copy a fixed category
+   list from another project — derive it from what is actually in these
+   papers.
+7. For each category, enumerate the allowed values that actually appear
    across the sampled papers (plus close variants worth merging as aliases,
    e.g. "Fe(NO3)3", "iron nitrate", "ferric nitrate" as aliases of one
    canonical value "iron"). Do not invent values that were not observed.
-6. Write the taxonomy to a local JSON file and submit it:
+8. Write the taxonomy to a local JSON file and submit it:
 
 ```text
 py -3.10 labkag-reviewer-skill/scripts/labkag_api.py taxonomy-set \

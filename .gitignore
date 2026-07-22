@@ -50,3 +50,6 @@ data/taxonomies/
 *.db
 *.db-wal
 *.db-shm
+
+# Ad-hoc scratch files (manual testing/investigation, never committed)
+/tmp_*

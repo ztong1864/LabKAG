@@ -279,6 +279,77 @@ def test_match_topic_summary_counts_excluded_papers():
     }
 
 
+def test_match_topic_excludes_paper_outside_declared_year_range():
+    rows = [
+        _confirmed_row("in_range"),
+        _confirmed_row("too_old"),
+    ]
+    rows[0].paper_properties["year"] = "2024"
+    rows[1].paper_properties["year"] = "2010"
+    plan = TopicPlan(
+        topic="iron oxidation",
+        project_id="proj_1",
+        concepts=_MULTI_TIER_CONCEPTS,
+        year_from=2024,
+        year_to=2025,
+    )
+
+    result = match_topic(
+        "proj_1",
+        plan,
+        min_essential_signals=2,
+        include_borderline=True,
+        limit=None,
+        query_store=FakeQueryStore(rows),
+        embedding_client=None,
+    )
+
+    assert [paper.paper_id for paper in result["confirmed"]] == ["in_range"]
+    assert result["confirmed"][0].year == 2024
+    assert result["summary"]["excluded_count"] == 1
+
+
+def test_match_topic_excludes_paper_with_missing_year_when_range_declared():
+    rows = [_confirmed_row("no_year")]
+    plan = TopicPlan(
+        topic="iron oxidation",
+        project_id="proj_1",
+        concepts=_MULTI_TIER_CONCEPTS,
+        year_from=2024,
+        year_to=2025,
+    )
+
+    result = match_topic(
+        "proj_1",
+        plan,
+        min_essential_signals=2,
+        include_borderline=True,
+        limit=None,
+        query_store=FakeQueryStore(rows),
+        embedding_client=None,
+    )
+
+    assert result["confirmed"] == []
+    assert result["summary"]["excluded_count"] == 1
+
+
+def test_match_topic_applies_no_year_filter_when_plan_leaves_it_unset():
+    rows = [_confirmed_row("no_year")]
+    plan = TopicPlan(topic="iron oxidation", project_id="proj_1", concepts=_MULTI_TIER_CONCEPTS)
+
+    result = match_topic(
+        "proj_1",
+        plan,
+        min_essential_signals=2,
+        include_borderline=True,
+        limit=None,
+        query_store=FakeQueryStore(rows),
+        embedding_client=None,
+    )
+
+    assert [paper.paper_id for paper in result["confirmed"]] == ["no_year"]
+
+
 # ---- verify_plan ----
 
 

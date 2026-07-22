@@ -39,6 +39,7 @@ class TopicPlan(BaseModel):
 class MatchedPaper(BaseModel):
     paper_id: str
     title: str = ""
+    year: int | None = None
     tier: Literal["confirmed", "borderline"]
     matched_concepts: list[dict] = Field(default_factory=list)
     co_occurrence: bool = False
