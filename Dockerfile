@@ -8,7 +8,7 @@ COPY scripts ./scripts
 COPY Readme.md ./Readme.md
 COPY docs ./docs
 
-RUN mkdir -p /app/data/uploads /app/data/parsed /app/data/extractions
+RUN mkdir -p /app/data/uploads /app/data/parsed /app/data/metadata
 
 EXPOSE 8000
 

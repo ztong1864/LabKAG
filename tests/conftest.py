@@ -12,5 +12,5 @@ def isolate_disk_stores(tmp_path, monkeypatch):
     state and can't leak paper_id/document_id/project_id collisions into
     each other."""
     monkeypatch.setattr(file_store, "upload_dir", tmp_path / "uploads")
-    monkeypatch.setattr(metadata_store, "extraction_dir", tmp_path / "extractions")
+    monkeypatch.setattr(metadata_store, "metadata_dir", tmp_path / "metadata")
     monkeypatch.setattr(taxonomy_store, "taxonomy_dir", tmp_path / "taxonomies")

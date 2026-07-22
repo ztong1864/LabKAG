@@ -6,7 +6,7 @@ def main() -> None:
         settings.data_dir,
         settings.upload_dir,
         settings.parsed_dir,
-        settings.extraction_dir,
+        settings.metadata_dir,
     ]:
         path.mkdir(parents=True, exist_ok=True)
         print(path)

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("data/uploads")
     parsed_dir: Path = Path("data/parsed")
     parsed_backup_dir: Path = Path("data/parsed_backup")
-    extraction_dir: Path = Path("data/extractions")
+    metadata_dir: Path = Path("data/metadata")
     taxonomy_dir: Path = Path("data/taxonomies")
     graph_backend: str = "neo4j"
     sqlite_db_path: Path = Path("data/graph.db")

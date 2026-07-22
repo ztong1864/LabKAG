@@ -8,5 +8,5 @@ __pycache__
 .env
 data/uploads
 data/parsed
-data/extractions
+data/metadata
 logs

@@ -12,6 +12,7 @@ class ExtractPaperRequest(BaseModel):
     return_chunks: bool = False
     use_backup: bool = False
     mineru_output_dir: str | None = None
+    metadata_output_dir: str | None = None
 
 
 class IngestPaperRequest(BaseModel):

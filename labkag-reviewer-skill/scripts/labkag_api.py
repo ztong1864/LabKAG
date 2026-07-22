@@ -38,6 +38,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         "return_chunks": args.return_chunks,
         "use_backup": args.use_backup,
         "mineru_output_dir": args.mineru_output_dir,
+        "metadata_output_dir": args.metadata_output_dir,
     }
     return _print_json_response("POST", f"{args.base_url}/v1/papers/extract", json_payload=payload)
 
@@ -189,6 +190,8 @@ def cmd_batch_extract(args: argparse.Namespace) -> int:
             }
             if args.mineru_output_dir:
                 extract_payload["mineru_output_dir"] = args.mineru_output_dir
+            if args.metadata_output_dir:
+                extract_payload["metadata_output_dir"] = args.metadata_output_dir
             extract_resp = requests.post(
                 f"{args.base_url}/v1/papers/extract", json=extract_payload, timeout=args.timeout
             )
@@ -366,6 +369,9 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--mineru-output-dir",
                          help="Override MinerU output directory for this call "
                               "(default: server's PARSED_DIR setting).")
+    extract.add_argument("--metadata-output-dir",
+                         help="Also write a copy of the extraction result JSON here "
+                              "(default: only the server's METADATA_DIR).")
     extract.set_defaults(func=cmd_extract)
 
     ingest = subparsers.add_parser("ingest")
@@ -453,6 +459,11 @@ def build_parser() -> argparse.ArgumentParser:
     batch_extract.add_argument("--extract-level", default="basic", choices=["basic", "detailed"])
     batch_extract.add_argument(
         "--mineru-output-dir", help="Optional: reuse a pre-parsed MinerU output directory."
+    )
+    batch_extract.add_argument(
+        "--metadata-output-dir",
+        help="Optional: also write a copy of each extraction result JSON here "
+        "on the server (default: only the server's METADATA_DIR).",
     )
     batch_extract.add_argument("--manifest", help="Defaults to <extractions-dir>/extract_manifest.json")
     batch_extract.add_argument("--limit", type=int, default=0, help="Max PDFs to process. 0 = all.")

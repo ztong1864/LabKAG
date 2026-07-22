@@ -105,7 +105,11 @@ def extract_paper(request: ExtractPaperRequest) -> SkillResponse:
             except ExtractionError as exc:
                 warnings.append(f"Tagging failed; extraction saved untagged: {exc}")
 
-    metadata_store.save_extraction(document_id, extraction.model_dump(mode="json"))
+    metadata_store.save_extraction(
+        document_id,
+        extraction.model_dump(mode="json"),
+        extra_output_dir=request.metadata_output_dir,
+    )
 
     data = {"paper_extraction": extraction.model_dump(mode="json")}
     if request.return_chunks:
