@@ -1,5 +1,5 @@
 ---
-name: labkag-reviewer-skill
+name: labkag-review-skill
 description: "API wrapper skill for LabKAG. Use when an agent needs to call the LabKAG HTTP API through the bundled CLI script for health checks, upload, extraction, ingestion, literature query, evidence search, knowledge inspection, taxonomy management, or topic-based paper discovery. Two separately-invocable workflows: paper storage building (ingest + taxonomy + tagging) and paper discovery/recommendation (topic match against an already-built project)."
 ---
 
