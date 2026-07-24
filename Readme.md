@@ -11,8 +11,8 @@ or `/v1/papers/match-topic`. LLM calls only happen at build time (structured
 extraction, entity tagging against a taxonomy) and are owned by the caller.
 Any step that requires judgment about a domain (what a taxonomy's categories
 should be, how to decompose a topic into a match plan) happens in the
-agent/skill layer, not in this service — see
-[`labkag-reviewer-skill/`](labkag-reviewer-skill/SKILL.md).
+agent/skill layer, not in this service — see `labkag-review-skill` (see
+below; it lives in a separate repository, not in this one).
 
 ## Quickstart
 
@@ -65,7 +65,7 @@ py -3.10 -m ruff check .
   `match_score` (corroboration strength) and can be scored against an
   optional `target_count` to suggest a principled cutoff — never a hardcoded
   threshold, never padded past what actually qualified.
-- **`labkag-reviewer-skill`**: the agent-facing CLI and prompt contracts that
+- **`labkag-review-skill`**: the agent-facing CLI and prompt contracts that
   drive this API — see below.
 
 ## API Endpoints
@@ -136,11 +136,17 @@ $env:GRAPH_BACKEND="sqlite"
 $env:SQLITE_DB_PATH="data/graph.db"
 ```
 
-## `labkag-reviewer-skill`
+## `labkag-review-skill`
 
-The agent-facing layer that drives this API — see
-[`labkag-reviewer-skill/SKILL.md`](labkag-reviewer-skill/SKILL.md) for the
-full contract. It separates two independently-callable workflows:
+The agent-facing layer that drives this API. **This is the only place it
+lives** — `skills/labkag-review-skill/` in the review-writer repository (a
+separate repository the user maintains, e.g. `D:\Git_projects\review-writer`
+on this machine). There is deliberately no copy of it in this repository:
+keeping two copies in sync by hand was a real, recurring source of drift
+(stale schema references, a missing bugfix applied to only one copy), so it
+was consolidated into the one that's actually wired into the downstream
+review-writing pipeline. See its `SKILL.md` there for the full contract. It
+separates two independently-callable workflows:
 
 1. **Paper storage building** — ingest a corpus (`batch-extract` +
    `batch-ingest`), bootstrap or rebuild a project's taxonomy (asking the
@@ -159,9 +165,10 @@ Storage building must exist before discovery can run against a project
 beyond that, either workflow can be invoked independently against an
 already-built project.
 
-An export script (`scripts/export_discovery_format.py`) can translate a
-`match-topic` response into the output format used by a separate
-`review-topic-paper-discovery` skill, for interop with downstream
+An export script (`export_discovery_format.py`, part of `labkag-review-skill`
+in the review-writer repo, not this one) can translate a `match-topic`
+response into the output format used by a separate
+`review-online-paper-discovery` skill, for interop with downstream
 review-writing pipelines built against that format.
 
 ## Scripts

@@ -98,6 +98,35 @@ def discover_pdfs(input_dir: Path, output_dir: Path, limit: int) -> list[Path]:
     return pdfs
 
 
+def _load_manifest(manifest_path: Path) -> dict:
+    """Load manifest.json if present so runs accumulate instead of overwrite.
+
+    manifest.json has no functional role in the actual parse-skip caching
+    (MinerUClient._read_cache checks the filesystem directly), but it's the
+    human-facing record of every PDF ever processed by this script, possibly
+    across many invocations with different --input-dir values. A missing or
+    unreadable file (including the old pre-merge schema, which had no
+    "papers" key) is treated as an empty starting point.
+    """
+    if manifest_path.exists():
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    else:
+        data = {}
+    data.setdefault("tool", "labkag-mineru-batch-parse")
+    if not isinstance(data.get("papers"), dict):
+        data["papers"] = {}
+    return data
+
+
+def _write_manifest(manifest_path: Path, manifest: dict) -> None:
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def main() -> int:
     args = parse_args()
     output_dir = args.output_dir.resolve()
@@ -134,11 +163,12 @@ def main() -> int:
 
     print(f"Found {len(pdfs)} PDF(s)  |  output: {output_dir}\n")
 
-    manifest: dict = {
-        "tool": "labkag-mineru-batch-parse",
+    manifest_path = output_dir / "manifest.json"
+    manifest = _load_manifest(manifest_path)
+    manifest["output_dir"] = str(output_dir)
+    manifest["last_run"] = {
         "input_dir": str(input_dir),
-        "output_dir": str(output_dir),
-        "created_at": _now_utc(),
+        "started_at": _now_utc(),
         "settings": {
             "language": args.language,
             "model_version": args.model_version,
@@ -148,10 +178,8 @@ def main() -> int:
             "batch_size": args.batch_size,
         },
         "queued": len(pdfs),
-        "completed": [],
-        "failed": [],
-        "skipped": [],
     }
+    papers: dict = manifest["papers"]
 
     results = client.materialize_batch(
         pdfs,
@@ -161,15 +189,20 @@ def main() -> int:
         on_progress=print,
     )
 
+    run_completed = run_failed = run_skipped = 0
     for result in results:
+        pdf_name = result.pdf_path.name
         if result.state == "cached":
-            print(f"[skip] {result.pdf_path.name} -> existing {result.slug}.md")
-            manifest["skipped"].append({"pdf_name": result.pdf_path.name, "slug": result.slug})
-            continue
-        if result.state == "done" and result.artifacts:
+            print(f"[skip] {pdf_name} -> existing {result.slug}.md")
+            papers[pdf_name] = {
+                "slug": result.slug,
+                "state": "skipped",
+                "updated_at": _now_utc(),
+            }
+            run_skipped += 1
+        elif result.state == "done" and result.artifacts:
             a = result.artifacts
-            record = {
-                "pdf_name": result.pdf_path.name,
+            papers[pdf_name] = {
                 "slug": a.slug,
                 "state": "done",
                 "raw_zip": str(a.raw_zip),
@@ -177,37 +210,47 @@ def main() -> int:
                 "full_md": str(a.full_md),
                 "markdown_copy": str(a.markdown_copy),
                 "markdown_chars": len(a.markdown),
+                "updated_at": _now_utc(),
             }
-            manifest["completed"].append(record)
             print(
-                f"[done] {result.pdf_path.name} -> {a.markdown_copy.name} "
+                f"[done] {pdf_name} -> {a.markdown_copy.name} "
                 f"({len(a.markdown):,} chars)"
             )
+            run_completed += 1
         else:
-            manifest["failed"].append({
-                "pdf_name": result.pdf_path.name,
+            papers[pdf_name] = {
                 "slug": result.slug,
+                "state": "failed",
                 "error": result.error or "unknown error",
-            })
-            print(f"[failed] {result.pdf_path.name}: {result.error}")
+                "updated_at": _now_utc(),
+            }
+            print(f"[failed] {pdf_name}: {result.error}")
+            run_failed += 1
+        _write_manifest(manifest_path, manifest)
 
-    manifest["finished_at"] = _now_utc()
-    manifest["completed_count"] = len(manifest["completed"])
-    manifest["failed_count"] = len(manifest["failed"])
-    manifest["skipped_count"] = len(manifest["skipped"])
+    manifest["last_run"]["finished_at"] = _now_utc()
+    manifest["last_run"]["completed_count"] = run_completed
+    manifest["last_run"]["failed_count"] = run_failed
+    manifest["last_run"]["skipped_count"] = run_skipped
+    manifest["updated_at"] = _now_utc()
+    total_done = sum(1 for p in papers.values() if p.get("state") == "done")
+    total_failed = sum(1 for p in papers.values() if p.get("state") == "failed")
+    total_skipped = sum(1 for p in papers.values() if p.get("state") == "skipped")
+    manifest["total_done"] = total_done
+    manifest["total_failed"] = total_failed
+    manifest["total_skipped"] = total_skipped
+    _write_manifest(manifest_path, manifest)
 
-    manifest_path = output_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    print("\n=== Summary ===")
+    print("\n=== This run ===")
+    print(f"Done: {run_completed}  Failed: {run_failed}  Skipped: {run_skipped}")
+    print("\n=== Cumulative (all papers recorded in this manifest) ===")
     print(
-        f"Done: {manifest['completed_count']}  "
-        f"Failed: {manifest['failed_count']}  "
-        f"Skipped: {manifest['skipped_count']}"
+        f"Done: {total_done}  Failed: {total_failed}  Skipped: {total_skipped}  "
+        f"Total: {len(papers)}"
     )
     print(f"Manifest: {manifest_path}")
 
-    return 0 if not manifest["failed"] else 1
+    return 0 if run_failed == 0 else 1
 
 
 if __name__ == "__main__":
